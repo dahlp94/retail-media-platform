@@ -1,0 +1,50 @@
+# Synthetic retail media data generator — default assumptions.
+# Load in Python e.g. yaml.safe_load() then access keys as nested dicts or map to pydantic models.
+
+simulation:
+  # Reproducibility for audits and CI
+  random_seed: 42
+
+  # Calendar span for synthetic events (inclusive-ish daily grain in generator)
+  calendar:
+    start_date: "2024-01-01"
+    end_date: "2024-06-30"
+
+  # Scale of synthetic entities (keep modest for laptops; raise for stress tests)
+  entities:
+    n_retailers: 2
+    n_advertisers: 8
+    n_campaigns: 24
+    n_placements: 6
+    n_audience_segments: 5
+    n_products: 40
+
+  # Daily impression volume per campaign (rough order of magnitude; generator may jitter)
+  delivery:
+    base_impressions_per_campaign_per_day: 5000
+    impression_volatility: 0.15  # multiplicative noise std (fraction of mean)
+
+  # Engagement — retail display / sponsored product style benchmarks
+  engagement:
+    base_ctr: 0.006  # 0.6% — tune up for search-like placements
+    ctr_segment_spread: 0.003  # how much CTR varies by segment (absolute)
+
+  # Outcomes — post-click or view-through style (generator interprets windows separately)
+  conversion:
+    base_click_cvr: 0.045  # 4.5% of clicks convert within attribution window
+    base_view_through_cvr: 0.0008  # orders per impression proxy order; keep small
+    order_value:
+      mean_usd: 42.0
+      std_usd: 18.0
+
+  # Economics — aligns with CPM/CPC style retail media
+  pricing:
+    cpm_usd: 14.0
+    cpc_usd: 0.85
+    # Fraction of impressions billed as CPC-equivalent paths (rest CPM) — generator hook
+    cpc_share_of_clicks: 1.0
+
+  # Identity / measurement noise (synthetic ID stability)
+  measurement:
+    user_id_collision_rate: 0.02  # small duplicate-device rate
+    missing_click_id_rate: 0.005
