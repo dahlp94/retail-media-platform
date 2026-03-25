@@ -35,11 +35,17 @@ htmlcov/
 .pytest_cache/
 
 ############################
-# Data (IMPORTANT)
+# Data
 ############################
-data/raw/
-data/processed/
-data/synthetic/
+# Ignore contents, not folders
+data/raw/*
+data/processed/*
+data/synthetic/*
+
+# Keep folder structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/synthetic/.gitkeep
 
 # Allow folder structure but ignore files
 !data/.gitkeep
