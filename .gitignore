@@ -1,0 +1,101 @@
+############################
+# Virtual Environments
+############################
+venv/
+venv_rmp/
+.env/
+.env.*
+!.env.example
+
+############################
+# Python
+############################
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+############################
+# Dependency / Packaging
+############################
+pip-wheel-metadata/
+*.log
+
+############################
+# Testing
+############################
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
+############################
+# Data (IMPORTANT)
+############################
+data/raw/
+data/processed/
+data/synthetic/
+
+# Allow folder structure but ignore files
+!data/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/synthetic/.gitkeep
+
+############################
+# Jupyter Notebooks
+############################
+.ipynb_checkpoints/
+
+############################
+# ML / Experiment Tracking
+############################
+mlruns/
+*.pkl
+*.joblib
+*.h5
+
+############################
+# Database / Local State
+############################
+*.db
+*.sqlite3
+
+############################
+# App / Secrets
+############################
+.env
+
+############################
+# Streamlit / Dash
+############################
+.streamlit/
+
+############################
+# IDE / Editor
+############################
+.vscode/
+.idea/
+
+############################
+# OS Files
+############################
+.DS_Store
+Thumbs.db
+
+############################
+# Logs
+############################
+logs/
+*.log
+
+############################
+# Misc
+############################
+*.tmp
+*.swp
