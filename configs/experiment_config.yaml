@@ -1,0 +1,38 @@
+# Incrementality / lift study defaults for synthetic experiments.
+# Names mirror docs/experiment_design.md concepts for downstream services.
+
+experiment:
+  # What is randomized or split (generator or assignment step uses this)
+  design:
+    unit: user  # user | household | geo — synthetic pipeline default
+    assignment: randomized_holdout  # randomized_holdout | geo_holdout | audience_split
+
+  # Share of eligible population held out from treatment (control / non-exposed)
+  holdout:
+    fraction: 0.10  # 10% holdout is common for portfolio-scale demos
+
+  # Windows in days — align with attribution windows in simulation when possible
+  windows:
+    pre_period_days: 14  # balance checks before go-live
+    test_period_days: 28  # main read
+    cool_down_days: 7  # capture lagged conversions after last impression
+    attribution_click_days: 7
+    attribution_view_days: 1
+
+  # Primary outcome for lift (SQL / analysis layer aggregates this)
+  outcome:
+    metric: revenue_per_user  # revenue_per_user | conversion_rate | orders_per_user
+    currency: USD
+
+  # Lift statistics (placeholders for notebook / service)
+  estimation:
+    relative_lift_formula: treatment_mean_minus_control_over_control
+    confidence_level: 0.95
+    # When true, analysis modules may use bootstrap; false = analytic SE only if implemented
+    bootstrap_iterations: 500
+
+  # Geo design knobs (used when assignment: geo_holdout)
+  geo:
+    n_treatment_geos: 40
+    n_control_geos: 8
+    spillover_warning_miles: 50
