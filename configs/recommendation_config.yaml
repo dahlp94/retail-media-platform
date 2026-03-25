@@ -1,0 +1,43 @@
+# Recommendation / budget-hint defaults — rule-based first; ML can read same keys later.
+# Python loaders should treat thresholds as floats and lists as explicit.
+
+recommendation:
+  # Signals combined into a simple score (weights sum to 1.0 for interpretability)
+  scoring:
+    weight_roas: 0.35
+    weight_iroas: 0.45
+    weight_lift: 0.20
+
+  # ROAS from attributed revenue / spend (same definition as docs/kpi_definitions.md)
+  roas:
+    strong_min: 3.5
+    weak_max: 1.2
+
+  # iROAS from incremental revenue / spend
+  iroas:
+    strong_min: 2.5
+    weak_max: 0.9
+
+  # Relative lift from experiment (fraction, e.g. 0.08 = 8%)
+  lift:
+    strong_min: 0.08
+    weak_max: 0.02
+
+  # Heuristic flags: campaign looks good in attribution but bad on incrementality
+  over_credit:
+    roas_min_for_flag: 4.0
+    iroas_max_for_flag: 1.0
+    lift_max_for_flag: 0.03
+
+  # Budget nudges — cap how much a single recommendation moves allocation (portfolio demo)
+  budget:
+    max_increase_fraction: 0.25  # +25% vs current
+    max_decrease_fraction: 0.20  # -20% vs current
+    min_spend_usd_for_recommendation: 500.0  # ignore tiny tests
+
+  # Output labels for API / dashboard consumers
+  labels:
+    increase_budget: increase_budget
+    hold_steady: hold_steady
+    decrease_budget: decrease_budget
+    investigate_attribution_gap: investigate_attribution_gap
