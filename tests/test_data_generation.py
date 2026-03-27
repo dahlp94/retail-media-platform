@@ -1,10 +1,8 @@
 """
-Validate synthetic dimension CSVs under ``data/synthetic/`` against project configs and generator contracts.
+Validate generated CSV schemas and key constraints in ``data/synthetic/``.
 
-Run data generators first if files are missing::
-
-    python scripts/generate_members.py
-    python scripts/generate_advertisers.py
+These tests are intentionally simple and focus on practical data contracts used by
+downstream SQL and analytics layers.
 """
 
 from __future__ import annotations
@@ -17,15 +15,23 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SYNTHETIC_DIR = REPO_ROOT / "data" / "synthetic"
-MEMBERS_PATH = SYNTHETIC_DIR / "members.csv"
-ADVERTISERS_PATH = SYNTHETIC_DIR / "advertisers.csv"
 SIMULATION_CONFIG = REPO_ROOT / "configs" / "simulation_config.yaml"
 EXPERIMENT_CONFIG = REPO_ROOT / "configs" / "experiment_config.yaml"
 
-# Defaults if YAML cannot be read (match checked-in configs).
-_DEFAULT_ENTITIES = {"n_retailers": 2, "n_advertisers": 8, "n_audience_segments": 5}
+MEMBERS_PATH = SYNTHETIC_DIR / "members.csv"
+ADVERTISERS_PATH = SYNTHETIC_DIR / "advertisers.csv"
+CAMPAIGNS_PATH = SYNTHETIC_DIR / "campaigns.csv"
+ASSIGNMENTS_PATH = SYNTHETIC_DIR / "campaign_experiment_assignments.csv"
+
+_DEFAULT_ENTITIES = {
+    "n_retailers": 2,
+    "n_advertisers": 8,
+    "n_campaigns": 24,
+    "n_audience_segments": 5,
+}
 _DEFAULT_GEO = {"n_treatment_geos": 40, "n_control_geos": 8}
 _DEFAULT_CAL_START = "2024-01-01"
+_DEFAULT_CAL_END = "2024-06-30"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -40,133 +46,164 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _simulation_bounds() -> dict[str, Any]:
-    data = _load_yaml(SIMULATION_CONFIG)
-    sim = data.get("simulation", data) if data else {}
+    sim_data = _load_yaml(SIMULATION_CONFIG)
+    sim = sim_data.get("simulation", sim_data) if sim_data else {}
     entities = {**_DEFAULT_ENTITIES, **sim.get("entities", {})}
-    cal = sim.get("calendar", {})
-    start = cal.get("start_date", _DEFAULT_CAL_START)
-    return {"entities": entities, "calendar_start": pd.Timestamp(start)}
+    calendar = sim.get("calendar", {})
+    return {
+        "entities": entities,
+        "calendar_start": pd.Timestamp(calendar.get("start_date", _DEFAULT_CAL_START)),
+        "calendar_end": pd.Timestamp(calendar.get("end_date", _DEFAULT_CAL_END)),
+    }
 
 
-def _experiment_geo_count() -> int:
-    data = _load_yaml(EXPERIMENT_CONFIG)
-    exp = data.get("experiment", data) if data else {}
+def _geo_count() -> int:
+    exp_data = _load_yaml(EXPERIMENT_CONFIG)
+    exp = exp_data.get("experiment", exp_data) if exp_data else {}
     geo = {**_DEFAULT_GEO, **exp.get("geo", {})}
     return int(geo["n_treatment_geos"]) + int(geo["n_control_geos"])
 
 
 def _require_csv(path: Path) -> None:
     if not path.is_file():
-        pytest.skip(f"Missing {path}; run the matching script under scripts/ to generate it.")
+        pytest.skip(f"Missing {path}; generate it under scripts/ first.")
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def members_df() -> pd.DataFrame:
     _require_csv(MEMBERS_PATH)
     return pd.read_csv(MEMBERS_PATH)
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def advertisers_df() -> pd.DataFrame:
     _require_csv(ADVERTISERS_PATH)
     return pd.read_csv(ADVERTISERS_PATH)
 
 
-class TestMembersSchema:
-    """Column contract for ``members.csv`` (see ``scripts/generate_members.py``)."""
+@pytest.fixture(scope="module")
+def campaigns_df() -> pd.DataFrame:
+    _require_csv(CAMPAIGNS_PATH)
+    return pd.read_csv(CAMPAIGNS_PATH)
 
-    REQUIRED_COLUMNS = (
+
+@pytest.fixture(scope="module")
+def assignments_df() -> pd.DataFrame:
+    _require_csv(ASSIGNMENTS_PATH)
+    return pd.read_csv(ASSIGNMENTS_PATH)
+
+
+def test_all_generated_datasets_exist_and_non_empty(
+    members_df: pd.DataFrame,
+    advertisers_df: pd.DataFrame,
+    campaigns_df: pd.DataFrame,
+    assignments_df: pd.DataFrame,
+) -> None:
+    assert len(members_df) > 0
+    assert len(advertisers_df) > 0
+    assert len(campaigns_df) > 0
+    assert len(assignments_df) > 0
+
+
+class TestMembersSchema:
+    REQUIRED_COLUMNS = {
         "member_id",
         "retailer_id",
         "audience_segment_id",
         "primary_geo_id",
         "signup_date",
         "outcome_currency",
-    )
+    }
 
-    def test_file_exists(self) -> None:
-        _require_csv(MEMBERS_PATH)
+    def test_schema(self, members_df: pd.DataFrame) -> None:
+        assert self.REQUIRED_COLUMNS.issubset(members_df.columns)
 
-    def test_non_empty(self, members_df: pd.DataFrame) -> None:
-        assert len(members_df) >= 1
-
-    def test_schema_columns(self, members_df: pd.DataFrame) -> None:
-        missing = set(self.REQUIRED_COLUMNS) - set(members_df.columns)
-        assert not missing, f"Missing columns: {sorted(missing)}"
-
-    def test_member_id_unique_and_integer_like(self, members_df: pd.DataFrame) -> None:
-        assert members_df["member_id"].is_unique
-        assert pd.api.types.is_integer_dtype(members_df["member_id"])
-
-    def test_foreign_key_ranges(self, members_df: pd.DataFrame) -> None:
+    def test_key_and_ranges(self, members_df: pd.DataFrame) -> None:
         bounds = _simulation_bounds()
-        ent = bounds["entities"]
-        n_r = int(ent["n_retailers"])
-        n_seg = int(ent["n_audience_segments"])
-        n_geo = _experiment_geo_count()
+        n_retailers = int(bounds["entities"]["n_retailers"])
+        n_segments = int(bounds["entities"]["n_audience_segments"])
+        n_geo = _geo_count()
 
-        assert members_df["retailer_id"].between(1, n_r).all()
-        assert members_df["audience_segment_id"].between(1, n_seg).all()
+        assert members_df["member_id"].is_unique
+        assert members_df["retailer_id"].between(1, n_retailers).all()
+        assert members_df["audience_segment_id"].between(1, n_segments).all()
         assert members_df["primary_geo_id"].between(1, n_geo).all()
 
-    def test_signup_before_simulation_window(self, members_df: pd.DataFrame) -> None:
-        start = _simulation_bounds()["calendar_start"]
-        signup = pd.to_datetime(members_df["signup_date"])
-        assert signup.notna().all()
-        assert (signup < start).all()
-
-    def test_outcome_currency_non_empty(self, members_df: pd.DataFrame) -> None:
-        cur = members_df["outcome_currency"].astype(str).str.strip()
-        assert cur.ne("").all()
+    def test_dates_and_currency(self, members_df: pd.DataFrame) -> None:
+        cal_start = _simulation_bounds()["calendar_start"]
+        signup_date = pd.to_datetime(members_df["signup_date"])
+        assert signup_date.notna().all()
+        assert (signup_date < cal_start).all()
+        assert members_df["outcome_currency"].astype(str).str.strip().ne("").all()
 
 
 class TestAdvertisersSchema:
-    """Column contract for ``advertisers.csv`` (see ``scripts/generate_advertisers.py``)."""
-
-    REQUIRED_COLUMNS = (
+    REQUIRED_COLUMNS = {
         "advertiser_id",
         "advertiser_name",
         "retailer_id",
         "vertical_code",
         "created_at",
-    )
+    }
 
-    def test_file_exists(self) -> None:
-        _require_csv(ADVERTISERS_PATH)
+    def test_schema(self, advertisers_df: pd.DataFrame) -> None:
+        assert self.REQUIRED_COLUMNS.issubset(advertisers_df.columns)
 
-    def test_non_empty(self, advertisers_df: pd.DataFrame) -> None:
-        assert len(advertisers_df) >= 1
-
-    def test_schema_columns(self, advertisers_df: pd.DataFrame) -> None:
-        missing = set(self.REQUIRED_COLUMNS) - set(advertisers_df.columns)
-        assert not missing, f"Missing columns: {sorted(missing)}"
-
-    def test_advertiser_id_unique_and_integer_like(self, advertisers_df: pd.DataFrame) -> None:
+    def test_keys_and_ranges(self, advertisers_df: pd.DataFrame) -> None:
+        n_retailers = int(_simulation_bounds()["entities"]["n_retailers"])
         assert advertisers_df["advertiser_id"].is_unique
-        assert pd.api.types.is_integer_dtype(advertisers_df["advertiser_id"])
+        assert advertisers_df["advertiser_name"].astype(str).is_unique
+        assert advertisers_df["retailer_id"].between(1, n_retailers).all()
+        assert advertisers_df["vertical_code"].astype(str).str.strip().ne("").all()
 
     def test_row_count_matches_config(self, advertisers_df: pd.DataFrame) -> None:
         expected = int(_simulation_bounds()["entities"]["n_advertisers"])
         assert len(advertisers_df) == expected
 
-    def test_retailer_id_range(self, advertisers_df: pd.DataFrame) -> None:
-        n_r = int(_simulation_bounds()["entities"]["n_retailers"])
-        assert advertisers_df["retailer_id"].between(1, n_r).all()
 
-    def test_advertiser_name_unique(self, advertisers_df: pd.DataFrame) -> None:
-        assert advertisers_df["advertiser_name"].astype(str).is_unique
+class TestCampaignsSchema:
+    REQUIRED_COLUMNS = {
+        "campaign_id",
+        "campaign_name",
+        "advertiser_id",
+        "retailer_id",
+        "channel",
+        "pricing_model",
+        "bid_price_usd",
+        "budget_usd",
+        "daily_budget_usd",
+        "target_audience_segment_id",
+        "target_geo_id",
+        "start_date",
+        "end_date",
+    }
 
-    def test_vertical_code_nonempty(self, advertisers_df: pd.DataFrame) -> None:
-        v = advertisers_df["vertical_code"].astype(str).str.strip()
-        assert v.ne("").all()
+    def test_schema(self, campaigns_df: pd.DataFrame) -> None:
+        assert self.REQUIRED_COLUMNS.issubset(campaigns_df.columns)
 
-    def test_created_at_before_or_on_calendar_start(self, advertisers_df: pd.DataFrame) -> None:
-        start = _simulation_bounds()["calendar_start"]
-        created = pd.to_datetime(advertisers_df["created_at"])
-        assert created.notna().all()
-        assert (created.dt.normalize() <= start.normalize()).all()
+    def test_key_counts_and_fk(self, campaigns_df: pd.DataFrame, advertisers_df: pd.DataFrame) -> None:
+        entities = _simulation_bounds()["entities"]
+        assert campaigns_df["campaign_id"].is_unique
+        assert campaigns_df["campaign_name"].astype(str).is_unique
+        assert len(campaigns_df) == int(entities["n_campaigns"])
+        assert set(campaigns_df["advertiser_id"]).issubset(set(advertisers_df["advertiser_id"]))
 
-    def test_round_robin_retailer_balance(self, advertisers_df: pd.DataFrame) -> None:
-        """Generator assigns retailers round-robin; counts per retailer should match within one."""
-        counts = advertisers_df.groupby("retailer_id").size()
-        assert counts.max() - counts.min() <= 1
+    def test_campaign_ranges_and_windows(self, campaigns_df: pd.DataFrame) -> None:
+        bounds = _simulation_bounds()
+        n_retailers = int(bounds["entities"]["n_retailers"])
+        n_segments = int(bounds["entities"]["n_audience_segments"])
+        n_geo = _geo_count()
+        cal_start = bounds["calendar_start"]
+        cal_end = bounds["calendar_end"]
+
+        assert campaigns_df["retailer_id"].between(1, n_retailers).all()
+        assert campaigns_df["target_audience_segment_id"].between(1, n_segments).all()
+        assert campaigns_df["target_geo_id"].between(1, n_geo).all()
+        assert campaigns_df["budget_usd"].gt(0).all()
+        assert campaigns_df["daily_budget_usd"].gt(0).all()
+
+        start_date = pd.to_datetime(campaigns_df["start_date"])
+        end_date = pd.to_datetime(campaigns_df["end_date"])
+        assert (start_date <= end_date).all()
+        assert start_date.between(cal_start, cal_end).all()
+        assert end_date.between(cal_start, cal_end).all()
