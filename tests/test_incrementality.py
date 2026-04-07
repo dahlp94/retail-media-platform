@@ -10,66 +10,66 @@ Output columns match ``marts.experiment_lift_metrics``:
 ``control_conversion_rate``, ``absolute_lift``, ``relative_lift``, ``incremental_orders``,
 ``incremental_revenue``.
 """
-
-from __future__ import annotations
-
 import math
 
 import pandas as pd
 import pytest
 
-# --- Helpers mirroring ``marts.experiment_lift_metrics`` (SQL NULL ~= float NaN in assertions) ---
 
-
-def _rate(converters: int, n_members: int) -> float:
-    """converters / NULLIF(n_members, 0)."""
-    if n_members == 0:
-        return float("nan")
-    return converters / n_members
-
-
-def experiment_lift_metrics(
-    assignments: pd.DataFrame,
-    transactions: pd.DataFrame,
-) -> pd.DataFrame:
+def compute_experiment_lift(assignments: pd.DataFrame,
+                            campaigns: pd.DataFrame,
+                            transactions: pd.DataFrame) -> pd.DataFrame:
     """
-    Mirror campaign-level ``experiment_lift_metrics`` mart logic.
+    DataFrame-based reference implementation of experiment lift logic.
 
-    Parameters
-    ----------
-    assignments
-        Columns: ``campaign_id``, ``member_id``, ``experiment_arm`` (``treatment`` / ``control``).
-    transactions
-        Attributed orders: ``member_id``, ``source_campaign_id``, ``order_value_usd``.
-        Each row is one order; ``source_campaign_id`` links to the campaign (matches SQL grain).
+    Design:
+    - campaign membership comes from experiment assignment
+    - outcome window comes from campaign start/end dates
+    - outcomes use all transactions by assigned members during the campaign window
+    - source_campaign_id is intentionally ignored for causal outcome definition
     """
-    required_a = {"campaign_id", "member_id", "experiment_arm"}
-    if not required_a.issubset(assignments.columns):
-        raise ValueError(f"assignments missing columns: {required_a - set(assignments.columns)}")
+    experiment_population = assignments.merge(
+        campaigns[["campaign_id", "start_date", "end_date"]],
+        on="campaign_id",
+        how="inner",
+    )
 
-    tx = transactions.dropna(subset=["source_campaign_id"]).copy()
-    if tx.empty:
-        attributed = pd.DataFrame(
-            columns=["member_id", "campaign_id", "order_cnt", "revenue_usd"],
+    experiment_population = experiment_population[
+        experiment_population["experiment_arm"].isin(["treatment", "control"])
+    ].copy()
+
+    tx = transactions.copy()
+    tx["order_date"] = pd.to_datetime(tx["order_timestamp"]).dt.date
+
+    pop_tx = experiment_population.merge(
+        tx,
+        on="member_id",
+        how="left",
+        suffixes=("", "_tx"),
+    )
+
+    in_window = (
+        pop_tx["order_date"].notna()
+        & (pop_tx["order_date"] >= pop_tx["start_date"])
+        & (pop_tx["order_date"] <= pop_tx["end_date"])
+    )
+
+    pop_tx["txn_in_window"] = in_window.astype(int)
+    pop_tx["order_value_in_window"] = pop_tx["order_value_usd"].where(in_window, 0.0)
+    pop_tx["transaction_id_in_window"] = pop_tx["transaction_id"].where(in_window)
+
+    member_outcomes = (
+        pop_tx.groupby(["campaign_id", "member_id", "experiment_arm"], as_index=False)
+        .agg(
+            order_cnt=("txn_in_window", "sum"),
+            revenue_usd=("order_value_in_window", "sum"),
         )
-    else:
-        tx["campaign_id"] = tx["source_campaign_id"].astype(int)
-        attributed = (
-            tx.groupby(["member_id", "campaign_id"], as_index=False)
-            .agg(
-                order_cnt=("order_value_usd", "size"),
-                revenue_usd=("order_value_usd", "sum"),
-            )
-        )
+    )
 
-    a = assignments.loc[assignments["experiment_arm"].isin(["treatment", "control"])].copy()
-    ml = a.merge(attributed, on=["member_id", "campaign_id"], how="left")
-    ml["order_cnt"] = ml["order_cnt"].fillna(0)
-    ml["revenue_usd"] = ml["revenue_usd"].fillna(0.0)
-    ml["is_converter"] = (ml["order_cnt"] > 0).astype(int)
+    member_outcomes["is_converter"] = (member_outcomes["order_cnt"] > 0).astype(int)
 
-    arm = (
-        ml.groupby(["campaign_id", "experiment_arm"], as_index=False)
+    arm_agg = (
+        member_outcomes.groupby(["campaign_id", "experiment_arm"], as_index=False)
         .agg(
             n_members=("member_id", "count"),
             converters=("is_converter", "sum"),
@@ -78,220 +78,299 @@ def experiment_lift_metrics(
         )
     )
 
-    rows: list[dict] = []
-    for campaign_id in arm["campaign_id"].unique():
-        g = arm.loc[arm["campaign_id"] == campaign_id]
-        t = g.loc[g["experiment_arm"] == "treatment"]
-        c = g.loc[g["experiment_arm"] == "control"]
+    arm_agg["conversion_rate"] = arm_agg["converters"] / arm_agg["n_members"]
+    arm_agg["orders_per_member"] = arm_agg["total_orders"] / arm_agg["n_members"]
+    arm_agg["revenue_per_member"] = arm_agg["total_revenue"] / arm_agg["n_members"]
 
-        n_t = int(t["n_members"].iloc[0]) if len(t) else 0
-        n_c = int(c["n_members"].iloc[0]) if len(c) else 0
-        conv_t = int(t["converters"].iloc[0]) if len(t) else 0
-        conv_c = int(c["converters"].iloc[0]) if len(c) else 0
-        ord_t = int(t["total_orders"].iloc[0]) if len(t) else 0
-        ord_c = int(c["total_orders"].iloc[0]) if len(c) else 0
-        rev_t = float(t["total_revenue"].iloc[0]) if len(t) else 0.0
-        rev_c = float(c["total_revenue"].iloc[0]) if len(c) else 0.0
+    treatment = arm_agg[arm_agg["experiment_arm"] == "treatment"].copy()
+    control = arm_agg[arm_agg["experiment_arm"] == "control"].copy()
 
-        cvr_t = _rate(conv_t, n_t)
-        cvr_c = _rate(conv_c, n_c)
+    result = treatment.merge(control, on="campaign_id", suffixes=("_t", "_c"))
 
-        # NaN propagates like SQL NULL for (treatment_cvr - control_cvr).
-        abs_lift = cvr_t - cvr_c
+    result["absolute_lift"] = (
+        result["conversion_rate_t"] - result["conversion_rate_c"]
+    )
+    result["relative_lift"] = result["absolute_lift"] / result["conversion_rate_c"]
+    result["incremental_orders_per_member"] = (
+        result["orders_per_member_t"] - result["orders_per_member_c"]
+    )
+    result["incremental_revenue_per_member"] = (
+        result["revenue_per_member_t"] - result["revenue_per_member_c"]
+    )
+    result["incremental_orders"] = (
+        result["n_members_t"] * result["incremental_orders_per_member"]
+    )
+    result["incremental_revenue"] = (
+        result["n_members_t"] * result["incremental_revenue_per_member"]
+    )
 
-        if math.isnan(cvr_c) or cvr_c == 0.0:
-            rel_lift = float("nan")
-        elif math.isnan(abs_lift):
-            rel_lift = float("nan")
-        else:
-            rel_lift = abs_lift / cvr_c
-
-        if n_t > 0 and n_c > 0:
-            inc_ord = ord_t - n_t * (ord_c / n_c)
-            inc_rev = rev_t - n_t * (rev_c / n_c)
-        else:
-            inc_ord = float("nan")
-            inc_rev = float("nan")
-
-        rows.append(
-            {
-                "campaign_id": int(campaign_id),
-                "treatment_member_count": n_t,
-                "control_member_count": n_c,
-                "treatment_conversion_rate": cvr_t,
-                "control_conversion_rate": cvr_c,
-                "absolute_lift": abs_lift,
-                "relative_lift": rel_lift,
-                "incremental_orders": inc_ord,
-                "incremental_revenue": inc_rev,
-            }
-        )
-
-    return pd.DataFrame(rows)
+    return result
 
 
-# --- Golden cases ---
-
-
-def test_balanced_arms_lift_and_incremental_orders_revenue() -> None:
-    """
-    Campaign 1: 4 treatment (2 converters, 3 orders, $30), 4 control (1 converter, 1 order, $10).
-
-    Control CVR = 1/4 = 0.25; treatment CVR = 2/4 = 0.5.
-    incremental_orders = 3 - 4*(1/4) = 2; incremental_revenue = 30 - 4*(10/4) = 20.
-    """
-    assignments = pd.DataFrame(
+@pytest.fixture
+def base_campaigns() -> pd.DataFrame:
+    return pd.DataFrame(
         {
-            "campaign_id": [1, 1, 1, 1, 1, 1, 1, 1],
-            "member_id": [101, 102, 103, 104, 201, 202, 203, 204],
-            "experiment_arm": ["treatment"] * 4 + ["control"] * 4,
+            "campaign_id": [101],
+            "start_date": [pd.to_datetime("2026-01-01").date()],
+            "end_date": [pd.to_datetime("2026-01-07").date()],
         }
     )
-    transactions = pd.DataFrame(
-        {
-            "member_id": [101, 102, 102, 203],
-            "source_campaign_id": [1, 1, 1, 1],
-            "order_value_usd": [10.0, 10.0, 10.0, 10.0],
-        }
-    )
-    m = experiment_lift_metrics(assignments, transactions).set_index("campaign_id").loc[1]
-
-    assert m["treatment_member_count"] == 4
-    assert m["control_member_count"] == 4
-    assert m["treatment_conversion_rate"] == pytest.approx(0.5)
-    assert m["control_conversion_rate"] == pytest.approx(0.25)
-    assert m["absolute_lift"] == pytest.approx(0.25)
-    assert m["relative_lift"] == pytest.approx(1.0)  # 0.25 / 0.25
-    assert m["incremental_orders"] == pytest.approx(2.0)
-    assert m["incremental_revenue"] == pytest.approx(20.0)
 
 
-def test_zero_control_conversions_relative_lift_undefined() -> None:
-    """Control CVR = 0 → relative lift divides by NULL in SQL; incremental math still defined."""
+def test_incrementality_uses_all_transactions_in_campaign_window_not_source_campaign_id(base_campaigns):
     assignments = pd.DataFrame(
         {
-            "campaign_id": [1, 1, 1, 1],
+            "campaign_id": [101, 101, 101, 101],
             "member_id": [1, 2, 3, 4],
             "experiment_arm": ["treatment", "treatment", "control", "control"],
         }
     )
+
     transactions = pd.DataFrame(
         {
-            "member_id": [1],
-            "source_campaign_id": [1],
-            "order_value_usd": [50.0],
+            "transaction_id": [1001, 1002],
+            "member_id": [1, 3],
+            "order_timestamp": [
+                "2026-01-03 10:00:00",
+                "2026-01-04 12:00:00",
+            ],
+            "order_value_usd": [50.0, 30.0],
+            # deliberately not aligned to campaign_id to prove attribution is ignored
+            "source_campaign_id": [999, None],
         }
     )
-    m = experiment_lift_metrics(assignments, transactions).iloc[0]
 
-    assert m["control_conversion_rate"] == pytest.approx(0.0)
-    assert m["treatment_conversion_rate"] == pytest.approx(0.5)
-    assert m["absolute_lift"] == pytest.approx(0.5)
-    assert math.isnan(m["relative_lift"])
-    # orders: T=1, C=0, n_t=n_c=2 → 1 - 2*(0/2) = 1
-    assert m["incremental_orders"] == pytest.approx(1.0)
-    assert m["incremental_revenue"] == pytest.approx(50.0)
+    result = compute_experiment_lift(assignments, base_campaigns, transactions)
+    row = result.iloc[0]
+
+    assert row["converters_t"] == 1
+    assert row["converters_c"] == 1
+    assert row["conversion_rate_t"] == pytest.approx(0.5)
+    assert row["conversion_rate_c"] == pytest.approx(0.5)
+    assert row["absolute_lift"] == pytest.approx(0.0)
+    assert row["incremental_revenue"] == pytest.approx(20.0)
 
 
-def test_zero_treatment_conversions_negative_absolute_lift() -> None:
-    """Treatment has no attributed orders; control has some → lift negative; relative lift defined."""
+def test_out_of_window_transactions_do_not_count(base_campaigns):
     assignments = pd.DataFrame(
         {
-            "campaign_id": [1, 1, 1, 1],
-            "member_id": [1, 2, 3, 4],
-            "experiment_arm": ["treatment", "treatment", "control", "control"],
-        }
-    )
-    transactions = pd.DataFrame(
-        {
-            "member_id": [3, 4],
-            "source_campaign_id": [1, 1],
-            "order_value_usd": [20.0, 30.0],
-        }
-    )
-    m = experiment_lift_metrics(assignments, transactions).iloc[0]
-
-    assert m["treatment_conversion_rate"] == pytest.approx(0.0)
-    assert m["control_conversion_rate"] == pytest.approx(1.0)
-    assert m["absolute_lift"] == pytest.approx(-1.0)
-    assert m["relative_lift"] == pytest.approx(-1.0)
-    assert m["incremental_orders"] == pytest.approx(-2.0)
-    assert m["incremental_revenue"] == pytest.approx(-50.0)
-
-
-def test_zero_treatment_members_makes_rates_and_incremental_undefined() -> None:
-    """No treatment assignments: CVR undefined; incremental NULL (needs both n_t and n_c > 0)."""
-    assignments = pd.DataFrame(
-        {
-            "campaign_id": [1, 1],
-            "member_id": [10, 11],
-            "experiment_arm": ["control", "control"],
-        }
-    )
-    transactions = pd.DataFrame(
-        {
-            "member_id": [10],
-            "source_campaign_id": [1],
-            "order_value_usd": [15.0],
-        }
-    )
-    m = experiment_lift_metrics(assignments, transactions).iloc[0]
-
-    assert m["treatment_member_count"] == 0
-    assert m["control_member_count"] == 2
-    assert math.isnan(m["treatment_conversion_rate"])
-    assert m["control_conversion_rate"] == pytest.approx(0.5)
-    assert math.isnan(m["absolute_lift"])
-    assert math.isnan(m["relative_lift"])
-    assert math.isnan(m["incremental_orders"])
-    assert math.isnan(m["incremental_revenue"])
-
-
-def test_zero_control_members_makes_control_cvr_and_incremental_undefined() -> None:
-    """No control bucket: cannot scale incremental vs control mean."""
-    assignments = pd.DataFrame(
-        {
-            "campaign_id": [1, 1],
+            "campaign_id": [101, 101],
             "member_id": [1, 2],
-            "experiment_arm": ["treatment", "treatment"],
+            "experiment_arm": ["treatment", "control"],
         }
     )
+
     transactions = pd.DataFrame(
         {
-            "member_id": [1],
-            "source_campaign_id": [1],
-            "order_value_usd": [40.0],
+            "transaction_id": [1001, 1002],
+            "member_id": [1, 2],
+            "order_timestamp": [
+                "2025-12-31 23:59:59",  # before window
+                "2026-01-08 00:00:00",  # after window
+            ],
+            "order_value_usd": [100.0, 120.0],
+            "source_campaign_id": [101, 101],
         }
     )
-    m = experiment_lift_metrics(assignments, transactions).iloc[0]
 
-    assert m["treatment_member_count"] == 2
-    assert m["control_member_count"] == 0
-    assert m["treatment_conversion_rate"] == pytest.approx(0.5)
-    assert math.isnan(m["control_conversion_rate"])
-    assert math.isnan(m["absolute_lift"])
-    assert math.isnan(m["relative_lift"])
-    assert math.isnan(m["incremental_orders"])
-    assert math.isnan(m["incremental_revenue"])
+    result = compute_experiment_lift(assignments, base_campaigns, transactions)
+    row = result.iloc[0]
+
+    assert row["converters_t"] == 0
+    assert row["converters_c"] == 0
+    assert row["total_orders_t"] == 0
+    assert row["total_orders_c"] == 0
+    assert row["total_revenue_t"] == 0.0
+    assert row["total_revenue_c"] == 0.0
 
 
-def test_expected_experiment_lift_metric_column_contract() -> None:
-    """Column names align with ``marts.experiment_lift_metrics`` for future DB-backed tests."""
+def test_incremental_orders_and_revenue_are_scaled_from_per_member_differences(base_campaigns):
     assignments = pd.DataFrame(
-        {"campaign_id": [1, 1], "member_id": [1, 2], "experiment_arm": ["treatment", "control"]}
+        {
+            "campaign_id": [101, 101, 101, 101],
+            "member_id": [1, 2, 3, 4],
+            "experiment_arm": ["treatment", "treatment", "control", "control"],
+        }
     )
+
     transactions = pd.DataFrame(
-        {"member_id": [1], "source_campaign_id": [1], "order_value_usd": [10.0]}
+        {
+            "transaction_id": [1001, 1002, 1003, 1004],
+            "member_id": [1, 1, 2, 3],
+            "order_timestamp": [
+                "2026-01-02 09:00:00",
+                "2026-01-03 09:00:00",
+                "2026-01-04 09:00:00",
+                "2026-01-05 09:00:00",
+            ],
+            "order_value_usd": [10.0, 20.0, 30.0, 15.0],
+            "source_campaign_id": [None, None, None, None],
+        }
     )
-    out = experiment_lift_metrics(assignments, transactions)
-    assert set(out.columns) == {
-        "campaign_id",
-        "treatment_member_count",
-        "control_member_count",
-        "treatment_conversion_rate",
-        "control_conversion_rate",
+
+    result = compute_experiment_lift(assignments, base_campaigns, transactions)
+    row = result.iloc[0]
+
+    # treatment: 3 orders across 2 members => 1.5 orders/member
+    # control:   1 order  across 2 members => 0.5 orders/member
+    # incremental_orders = 2 * (1.5 - 0.5) = 2.0
+    assert row["orders_per_member_t"] == pytest.approx(1.5)
+    assert row["orders_per_member_c"] == pytest.approx(0.5)
+    assert row["incremental_orders"] == pytest.approx(2.0)
+
+    # treatment revenue = 60 => 30/member
+    # control revenue   = 15 => 7.5/member
+    # incremental_revenue = 2 * (30 - 7.5) = 45
+    assert row["revenue_per_member_t"] == pytest.approx(30.0)
+    assert row["revenue_per_member_c"] == pytest.approx(7.5)
+    assert row["incremental_revenue"] == pytest.approx(45.0)
+
+
+def test_absolute_and_relative_lift_are_computed_correctly(base_campaigns):
+    assignments = pd.DataFrame(
+        {
+            "campaign_id": [101, 101, 101, 101],
+            "member_id": [1, 2, 3, 4],
+            "experiment_arm": ["treatment", "treatment", "control", "control"],
+        }
+    )
+
+    transactions = pd.DataFrame(
+        {
+            "transaction_id": [1001, 1002, 1003],
+            "member_id": [1, 2, 3],
+            "order_timestamp": [
+                "2026-01-02 10:00:00",
+                "2026-01-03 10:00:00",
+                "2026-01-04 10:00:00",
+            ],
+            "order_value_usd": [20.0, 25.0, 15.0],
+            "source_campaign_id": [101, 101, 101],
+        }
+    )
+
+    result = compute_experiment_lift(assignments, base_campaigns, transactions)
+    row = result.iloc[0]
+
+    # treatment conversion = 2/2 = 1.0
+    # control conversion = 1/2 = 0.5
+    # absolute lift = 0.5
+    # relative lift = 1.0
+    assert row["conversion_rate_t"] == pytest.approx(1.0)
+    assert row["conversion_rate_c"] == pytest.approx(0.5)
+    assert row["absolute_lift"] == pytest.approx(0.5)
+    assert row["relative_lift"] == pytest.approx(1.0)
+
+
+def test_source_campaign_id_does_not_change_member_outcome_definition(base_campaigns):
+    assignments = pd.DataFrame(
+        {
+            "campaign_id": [101, 101, 101, 101],
+            "member_id": [1, 2, 3, 4],
+            "experiment_arm": ["treatment", "treatment", "control", "control"],
+        }
+    )
+
+    transactions_a = pd.DataFrame(
+        {
+            "transaction_id": [1001, 1002],
+            "member_id": [1, 3],
+            "order_timestamp": [
+                "2026-01-03 10:00:00",
+                "2026-01-03 11:00:00",
+            ],
+            "order_value_usd": [40.0, 25.0],
+            "source_campaign_id": [101, 101],
+        }
+    )
+
+    transactions_b = transactions_a.copy()
+    transactions_b["source_campaign_id"] = [999, None]
+
+    result_a = compute_experiment_lift(assignments, base_campaigns, transactions_a)
+    result_b = compute_experiment_lift(assignments, base_campaigns, transactions_b)
+
+    row_a = result_a.iloc[0]
+    row_b = result_b.iloc[0]
+
+    compare_cols = [
+        "converters_t",
+        "converters_c",
+        "total_orders_t",
+        "total_orders_c",
+        "total_revenue_t",
+        "total_revenue_c",
+        "conversion_rate_t",
+        "conversion_rate_c",
         "absolute_lift",
-        "relative_lift",
         "incremental_orders",
         "incremental_revenue",
-    }
+    ]
+
+    for col in compare_cols:
+        assert row_a[col] == pytest.approx(row_b[col])
+
+
+def test_zero_control_conversion_produces_infinite_relative_lift_in_reference_logic(base_campaigns):
+    """
+    The SQL implementation should return NULL when control conversion rate is zero.
+    This reference test checks the underlying scenario and makes the edge case explicit.
+    """
+    assignments = pd.DataFrame(
+        {
+            "campaign_id": [101, 101, 101, 101],
+            "member_id": [1, 2, 3, 4],
+            "experiment_arm": ["treatment", "treatment", "control", "control"],
+        }
+    )
+
+    transactions = pd.DataFrame(
+        {
+            "transaction_id": [1001],
+            "member_id": [1],
+            "order_timestamp": ["2026-01-03 10:00:00"],
+            "order_value_usd": [50.0],
+            "source_campaign_id": [None],
+        }
+    )
+
+    result = compute_experiment_lift(assignments, base_campaigns, transactions)
+    row = result.iloc[0]
+
+    assert row["conversion_rate_t"] == pytest.approx(0.5)
+    assert row["conversion_rate_c"] == pytest.approx(0.0)
+    assert row["absolute_lift"] == pytest.approx(0.5)
+    assert math.isinf(row["relative_lift"])
+
+
+def test_member_with_multiple_transactions_counts_once_as_converter(base_campaigns):
+    assignments = pd.DataFrame(
+        {
+            "campaign_id": [101, 101, 101, 101],
+            "member_id": [1, 2, 3, 4],
+            "experiment_arm": ["treatment", "treatment", "control", "control"],
+        }
+    )
+
+    transactions = pd.DataFrame(
+        {
+            "transaction_id": [1001, 1002, 1003],
+            "member_id": [1, 1, 3],
+            "order_timestamp": [
+                "2026-01-02 10:00:00",
+                "2026-01-03 10:00:00",
+                "2026-01-04 10:00:00",
+            ],
+            "order_value_usd": [10.0, 12.0, 8.0],
+            "source_campaign_id": [None, None, None],
+        }
+    )
+
+    result = compute_experiment_lift(assignments, base_campaigns, transactions)
+    row = result.iloc[0]
+
+    assert row["converters_t"] == 1
+    assert row["converters_c"] == 1
+    assert row["total_orders_t"] == 2
+    assert row["total_orders_c"] == 1
