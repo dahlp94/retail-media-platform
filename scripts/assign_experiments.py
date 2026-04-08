@@ -43,7 +43,7 @@ _FALLBACK_SIM = {"simulation": {"random_seed": 42}}
 _FALLBACK_EXPERIMENT = {
     "experiment": {
         "design": {"unit": "user", "assignment": "randomized_holdout"},
-        "holdout": {"fraction": 0.10},
+        "holdout": {"fraction": 0.10, "min_control_members_per_campaign": 15, "max_fraction": 0.45},
     }
 }
 
@@ -91,6 +91,8 @@ def assign_by_campaign(
     campaigns: pd.DataFrame,
     members: pd.DataFrame,
     holdout_fraction: float,
+    min_control_members_per_campaign: int,
+    max_holdout_fraction: float,
     random_seed: int,
 ) -> pd.DataFrame:
     """
@@ -101,6 +103,12 @@ def assign_by_campaign(
     """
     if not 0.0 <= holdout_fraction <= 1.0:
         raise ValueError("holdout_fraction must be between 0 and 1 inclusive.")
+    if min_control_members_per_campaign < 0:
+        raise ValueError("min_control_members_per_campaign must be >= 0.")
+    if not 0.0 <= max_holdout_fraction <= 1.0:
+        raise ValueError("max_holdout_fraction must be between 0 and 1 inclusive.")
+    if max_holdout_fraction < holdout_fraction:
+        raise ValueError("max_holdout_fraction must be >= holdout_fraction.")
 
     required_member_cols = {"member_id", "retailer_id", "audience_segment_id", "primary_geo_id"}
     required_campaign_cols = {
@@ -125,19 +133,25 @@ def assign_by_campaign(
         if eligible.empty:
             continue
 
+        n_eligible = len(eligible)
+        min_required_fraction = (
+            float(min_control_members_per_campaign) / float(n_eligible) if n_eligible > 0 else holdout_fraction
+        )
+        effective_holdout_fraction = min(max(holdout_fraction, min_required_fraction), max_holdout_fraction)
+
         # Campaign-specific deterministic RNG stream.
         stream_seed = int(random_seed + campaign_id * 1009)
         rng = np.random.default_rng(stream_seed)
         draws = rng.random(len(eligible))
 
-        arm = np.where(draws < holdout_fraction, "control", "treatment")
+        arm = np.where(draws < effective_holdout_fraction, "control", "treatment")
 
         out = eligible.assign(
             campaign_id=campaign_id,
             experiment_arm=arm,
             assignment_unit="user",
             assignment_method="randomized_holdout",
-            holdout_fraction=float(holdout_fraction),
+            holdout_fraction=float(effective_holdout_fraction),
         )
         assignments.append(
             out[
@@ -193,12 +207,17 @@ def main() -> None:
             "assign_experiments.py currently supports design.assignment=randomized_holdout and design.unit=user"
         )
 
-    holdout_fraction = float(exp_root.get("holdout", {}).get("fraction", 0.10))
+    holdout_cfg = exp_root.get("holdout", {})
+    holdout_fraction = float(holdout_cfg.get("fraction", 0.10))
+    min_control_members_per_campaign = int(holdout_cfg.get("min_control_members_per_campaign", 15))
+    max_holdout_fraction = float(holdout_cfg.get("max_fraction", 0.45))
 
     assignments = assign_by_campaign(
         campaigns=campaigns,
         members=members,
         holdout_fraction=holdout_fraction,
+        min_control_members_per_campaign=min_control_members_per_campaign,
+        max_holdout_fraction=max_holdout_fraction,
         random_seed=seed,
     )
 
