@@ -10,6 +10,8 @@ experiment:
   # Share of eligible population held out from treatment (control / non-exposed)
   holdout:
     fraction: 0.10  # 10% holdout is common for portfolio-scale demos
+    min_control_members_per_campaign: 15  # avoid tiny controls that create unstable, near-zero CVR reads
+    max_fraction: 0.45  # cap holdout inflation for very small-eligible campaigns
 
   # Windows in days — align with attribution windows in simulation when possible
   windows:
