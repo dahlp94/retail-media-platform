@@ -48,6 +48,15 @@ def _split_sql_statements(sql: str) -> list[str]:
     rstrip). This matches this repository's mart files, including multiline
     ``COMMENT ON`` blocks where only the closing line ends with a semicolon.
     """
+    def _has_executable_sql(block: str) -> bool:
+        """True if block has at least one non-comment, non-empty line."""
+        for raw in block.split("\n"):
+            line = raw.strip()
+            if not line or line.startswith("--"):
+                continue
+            return True
+        return False
+
     sql = sql.replace("\r\n", "\n")
     statements: list[str] = []
     buf: list[str] = []
@@ -56,10 +65,10 @@ def _split_sql_statements(sql: str) -> list[str]:
         if line.rstrip().endswith(";"):
             block = "\n".join(buf).strip()
             buf = []
-            if block:
+            if block and _has_executable_sql(block):
                 statements.append(block)
     remainder = "\n".join(buf).strip()
-    if remainder:
+    if remainder and _has_executable_sql(remainder):
         statements.append(remainder)
     return statements
 
