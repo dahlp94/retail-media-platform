@@ -2,9 +2,14 @@
 Generate synthetic purchase transactions for baseline and ad-incremental outcomes.
 
 Baseline orders are drawn for all members (including control holdouts) from a
-segment-based daily purchase propensity. Incremental orders are generated only
-for treatment-assigned members who have measurable ad exposure (impressions),
-with uplift that varies by audience segment and exposure intensity.
+segment-based daily purchase propensity. Experiment-attributed orders are then
+generated at assignment level with a realistic conversion process:
+
+- all assigned users (control + treatment) receive a baseline conversion
+  probability based on member/campaign fit
+- treatment users receive additional incremental uplift based on ad exposure
+  and segment responsiveness
+- final probability is baseline for control and baseline+uplift for treatment
 
 Inputs
 ------
@@ -294,17 +299,23 @@ def _exposure_day_table(
 
 
 def _build_incremental_transactions(
-    exposure_days: pd.DataFrame,
+    assignments: pd.DataFrame,
+    campaigns: pd.DataFrame,
+    members: pd.DataFrame,
+    ad_events: pd.DataFrame,
     conv: dict[str, Any],
     incremental_mult: np.ndarray,
+    baseline_mult: np.ndarray,
     rng: np.random.Generator,
 ) -> pd.DataFrame:
     """
-    For each treatment exposure day, Bernoulli trial for an extra incremental order.
+    Simulate campaign-attributed conversions using baseline + treatment uplift.
 
-    Uplift scales by segment, impression volume, and on-target vs off-target match quality.
+    Baseline conversion applies to every assignment (control and treatment) and
+    reflects member segment fit, targeting alignment, tenure, and light random
+    variation. Treatment receives additional uplift that is intentionally modest.
     """
-    if exposure_days.empty:
+    if assignments.empty:
         return pd.DataFrame(
             columns=[
                 "transaction_id",
@@ -319,25 +330,104 @@ def _build_incremental_transactions(
             ]
         )
 
-    base_inc = float(
-        conv.get(
-            "incremental_daily_rate_per_exposure_day",
-            _FALLBACK_SIM["simulation"]["conversion"]["incremental_daily_rate_per_exposure_day"],
+    assign = assignments.loc[:, ["campaign_id", "member_id", "experiment_arm"]].copy()
+    camp = campaigns.loc[:, ["campaign_id", "retailer_id", "target_audience_segment_id", "start_date", "end_date"]].copy()
+    mem = members.loc[:, ["member_id", "audience_segment_id", "signup_date", "outcome_currency"]].copy()
+    assign = assign.merge(camp, on="campaign_id", how="inner").merge(mem, on="member_id", how="inner")
+    if assign.empty:
+        return pd.DataFrame(
+            columns=[
+                "transaction_id",
+                "member_id",
+                "retailer_id",
+                "audience_segment_id",
+                "order_timestamp",
+                "order_value_usd",
+                "outcome_currency",
+                "purchase_driver",
+                "source_campaign_id",
+            ]
         )
+
+    assign["start_date"] = pd.to_datetime(assign["start_date"]).dt.normalize()
+    assign["end_date"] = pd.to_datetime(assign["end_date"]).dt.normalize()
+    assign["signup_date"] = pd.to_datetime(assign["signup_date"], errors="coerce").dt.normalize()
+    assign = assign.loc[assign["end_date"].ge(assign["start_date"])].copy()
+    if assign.empty:
+        return pd.DataFrame(
+            columns=[
+                "transaction_id",
+                "member_id",
+                "retailer_id",
+                "audience_segment_id",
+                "order_timestamp",
+                "order_value_usd",
+                "outcome_currency",
+                "purchase_driver",
+                "source_campaign_id",
+            ]
+        )
+
+    # Treatment ad exposure intensity from impression counts by assignment.
+    imp_counts = (
+        ad_events.loc[ad_events["event_type"].eq("impression"), ["member_id", "campaign_id"]]
+        .groupby(["member_id", "campaign_id"], as_index=False)
+        .size()
+        .rename(columns={"size": "n_impressions"})
     )
+    assign = assign.merge(imp_counts, on=["member_id", "campaign_id"], how="left")
+    assign["n_impressions"] = assign["n_impressions"].fillna(0).astype(float)
+
+    base_inc = float(conv.get("incremental_daily_rate_per_exposure_day", 0.0035))
     mean_usd = float(conv["order_value"]["mean_usd"])
     std_usd = float(conv["order_value"]["std_usd"])
 
-    seg_idx = (exposure_days["audience_segment_id"].astype(int).to_numpy() - 1).clip(0, len(incremental_mult) - 1)
+    seg_idx = (assign["audience_segment_id"].astype(int).to_numpy() - 1).clip(0, len(incremental_mult) - 1)
     seg_uplift = incremental_mult[seg_idx]
-    on_target = exposure_days["audience_segment_id"].astype(int).eq(exposure_days["target_audience_segment_id"].astype(int)).to_numpy()
-    match_q = np.where(on_target, _MATCH_QUALITY_ON_TARGET, _MATCH_QUALITY_OFF_TARGET)
-    n_imp = exposure_days["n_impressions"].astype(float).to_numpy()
-    intensity = 1.0 + 0.04 * np.log1p(n_imp)
+    seg_base = baseline_mult[seg_idx]
 
-    p = np.clip(base_inc * seg_uplift * match_q * intensity, 0.0, 0.22)
-    draws = rng.random(len(exposure_days)) < p
-    picked = exposure_days.loc[draws].reset_index(drop=True)
+    on_target = assign["audience_segment_id"].astype(int).eq(assign["target_audience_segment_id"].astype(int)).to_numpy()
+    target_fit = np.where(on_target, _MATCH_QUALITY_ON_TARGET, _MATCH_QUALITY_OFF_TARGET)
+
+    tenure_days = (assign["start_date"] - assign["signup_date"]).dt.days.fillna(120.0).clip(lower=0).to_numpy(dtype=float)
+    tenure_factor = 0.88 + 0.22 * np.tanh(tenure_days / 365.0)
+
+    # Campaign duration in whole days (inclusive). We scale daily probabilities
+    # to campaign-level conversion chance so control is not a one-shot draw.
+    campaign_days = (assign["end_date"] - assign["start_date"]).dt.days.add(1).clip(lower=1).to_numpy(dtype=int)
+
+    # Baseline daily conversion probability (applies to both control+treatment).
+    baseline_daily = float(
+        conv.get("baseline_daily_order_rate", _FALLBACK_SIM["simulation"]["conversion"]["baseline_daily_order_rate"])
+    )
+    base_noise = rng.uniform(0.88, 1.12, size=len(assign))
+    baseline_prob = np.clip(baseline_daily * seg_base * target_fit * tenure_factor * base_noise, 1e-6, 0.03)
+
+    # Convert daily baseline probability to campaign-level conversion probability:
+    # P(convert over campaign) = 1 - (1 - p_daily) ^ n_days
+    baseline_campaign_prob = 1.0 - np.power(1.0 - baseline_prob, campaign_days)
+
+    # Treatment uplift (causal ad impact): modest incremental increase.
+    # Uplift grows with exposure intensity but remains smaller than baseline.
+    n_imp = assign["n_impressions"].to_numpy(dtype=float)
+    intensity = np.log1p(n_imp) / np.log(6.0)
+    intensity = np.clip(intensity, 0.0, 1.6)
+    uplift_raw = base_inc * seg_uplift * target_fit * intensity
+    uplift_noise = rng.uniform(0.75, 1.25, size=len(assign))
+    uplift_prob = np.clip(uplift_raw * uplift_noise, 0.0, 0.03)
+
+    # Apply uplift at daily level for treatment, then convert to campaign-level
+    # probability using the same duration scaling.
+    treatment_daily_prob = np.clip(baseline_prob + uplift_prob, 1e-6, 0.08)
+    treatment_campaign_prob = 1.0 - np.power(1.0 - treatment_daily_prob, campaign_days)
+
+    is_treatment = assign["experiment_arm"].astype(str).eq("treatment").to_numpy()
+    final_prob = baseline_campaign_prob.copy()
+    final_prob[is_treatment] = treatment_campaign_prob[is_treatment]
+    final_prob = np.clip(final_prob, 0.0, 0.35)
+
+    draws = rng.random(len(assign)) < final_prob
+    picked = assign.loc[draws].reset_index(drop=True)
     if picked.empty:
         return pd.DataFrame(
             columns=[
@@ -354,17 +444,22 @@ def _build_incremental_transactions(
         )
 
     n = len(picked)
-    delay = np.minimum(rng.exponential(scale=90.0, size=n), 36 * 3600.0).astype(int)
-    order_ts = pd.to_datetime(picked["last_impression_ts"]) + pd.to_timedelta(delay, unit="s")
+    # Place conversion time inside campaign window with light day-time randomness.
+    campaign_days = (picked["end_date"] - picked["start_date"]).dt.days.clip(lower=0).to_numpy(dtype=int)
+    day_offset = np.array([rng.integers(0, d + 1) for d in campaign_days], dtype=int)
+    sec_offset = rng.integers(0, 24 * 60 * 60, size=n, endpoint=False)
+    order_ts = picked["start_date"] + pd.to_timedelta(day_offset, unit="D") + pd.to_timedelta(sec_offset, unit="s")
     values = _sample_order_values(n, mean_usd, std_usd, rng)
 
     return pd.DataFrame(
         {
             "member_id": picked["member_id"].astype(np.int64),
+            "retailer_id": picked["retailer_id"].astype(np.int64),
             "audience_segment_id": picked["audience_segment_id"].astype(np.int64),
             "order_timestamp": order_ts,
             "order_value_usd": values,
-            "purchase_driver": "incremental",
+            "outcome_currency": picked["outcome_currency"].astype(str),
+            "purchase_driver": "experiment_conversion",
             "source_campaign_id": picked["campaign_id"].astype(np.int64),
         }
     )
@@ -405,22 +500,16 @@ def generate_transactions_dataframe(
         rng=rng,
     )
 
-    exposure_days = _exposure_day_table(
-        ad_events=ad_events,
+    incremental_df = _build_incremental_transactions(
         assignments=assignments,
         campaigns=campaigns,
         members=members,
-    )
-    incremental_df = _build_incremental_transactions(
-        exposure_days=exposure_days,
+        ad_events=ad_events,
         conv=conv,
         incremental_mult=incremental_mult,
+        baseline_mult=baseline_mult,
         rng=rng,
     )
-
-    if not incremental_df.empty:
-        mem_map = members.loc[:, ["member_id", "retailer_id", "outcome_currency"]].drop_duplicates("member_id")
-        incremental_df = incremental_df.merge(mem_map, on="member_id", how="left")
 
     frames = [baseline_df, incremental_df]
     frames = [f for f in frames if not f.empty]
