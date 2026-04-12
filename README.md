@@ -149,3 +149,7 @@ Explore `notebooks/01_data_checks.ipynb`, `notebooks/03_segment_lift_analysis.ip
 - **Real-time or near-real-time pipelines** — Streaming events, incremental dbt/Airflow-style orchestration, and SLA-oriented marts.  
 - **Advanced causal inference** — Geo tests, synthetic controls, and uplift modeling behind the same SQL-first interfaces.  
 - **Product surfaces** — Production FastAPI endpoints and Streamlit or BI dashboards on top of existing marts.  
+
+## License
+
+This project is released under the [MIT License](https://opensource.org/licenses/MIT).
