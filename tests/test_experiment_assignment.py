@@ -5,7 +5,6 @@ Validate campaign-level treatment/control assignments in ``data/synthetic/``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import pytest
@@ -15,7 +14,6 @@ SYNTHETIC_DIR = REPO_ROOT / "data" / "synthetic"
 MEMBERS_PATH = SYNTHETIC_DIR / "members.csv"
 CAMPAIGNS_PATH = SYNTHETIC_DIR / "campaigns.csv"
 ASSIGNMENTS_PATH = SYNTHETIC_DIR / "campaign_experiment_assignments.csv"
-EXPERIMENT_CONFIG = REPO_ROOT / "configs" / "experiment_config.yaml"
 
 ARMS = {"control", "treatment"}
 REQUIRED_COLUMNS = {
@@ -26,23 +24,6 @@ REQUIRED_COLUMNS = {
     "assignment_method",
     "holdout_fraction",
 }
-
-
-def _load_yaml(path: Path) -> dict[str, Any]:
-    try:
-        import yaml
-    except ImportError:
-        return {}
-    if not path.is_file():
-        return {}
-    with path.open(encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
-
-
-def _configured_holdout_fraction() -> float:
-    data = _load_yaml(EXPERIMENT_CONFIG)
-    exp = data.get("experiment", data) if data else {}
-    return float(exp.get("holdout", {}).get("fraction", 0.10))
 
 
 def _require_csv(path: Path) -> None:
@@ -105,18 +86,26 @@ def test_each_campaign_has_single_arm_per_member_no_overlap(assignments_df: pd.D
 
 
 def test_reasonable_split_per_campaign(assignments_df: pd.DataFrame) -> None:
-    configured = _configured_holdout_fraction()
     summary = assignments_df.assign(is_control=assignments_df["experiment_arm"].eq("control")).groupby(
         "campaign_id", as_index=False
-    ).agg(n=("member_id", "count"), control_rate=("is_control", "mean"))
+    ).agg(
+        n=("member_id", "count"),
+        control_rate=("is_control", "mean"),
+        holdout_fraction=("holdout_fraction", "first"),
+    )
 
     # For very small campaign populations, random variation can be large.
     large = summary[summary["n"] >= 30]
     if large.empty:
         pytest.skip("No campaign has at least 30 assigned members for a stable split check.")
 
-    # Keep this tolerant to avoid brittle failures while still catching obvious issues.
-    assert large["control_rate"].between(max(0.0, configured - 0.20), min(1.0, configured + 0.20)).all()
+    # Compare observed control share to each campaign's effective holdout (may exceed the
+    # configured base fraction when min_control_members_per_campaign inflates the split).
+    tolerance = 0.20
+    lower = (large["holdout_fraction"] - tolerance).clip(lower=0.0)
+    upper = (large["holdout_fraction"] + tolerance).clip(upper=1.0)
+    within = (large["control_rate"] >= lower) & (large["control_rate"] <= upper)
+    assert within.all()
 
 
 def test_campaign_has_both_arms_when_population_is_large(assignments_df: pd.DataFrame) -> None:
