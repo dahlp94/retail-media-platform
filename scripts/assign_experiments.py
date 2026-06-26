@@ -83,7 +83,6 @@ def _eligible_members_for_campaign(members: pd.DataFrame, campaign: pd.Series) -
     """Return members eligible for one campaign using simple retailer/segment/geo targeting rules."""
     mask = members["retailer_id"].eq(int(campaign["retailer_id"]))
     mask &= members["audience_segment_id"].eq(int(campaign["target_audience_segment_id"]))
-    mask &= members["primary_geo_id"].eq(int(campaign["target_geo_id"]))
     return members.loc[mask, ["member_id"]].copy()
 
 

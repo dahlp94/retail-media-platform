@@ -335,7 +335,7 @@ def _build_incremental_transactions(
     n_imp = exposure_days["n_impressions"].astype(float).to_numpy()
     intensity = 1.0 + 0.04 * np.log1p(n_imp)
 
-    p = np.clip(base_inc * seg_uplift * match_q * intensity, 0.0, 0.22)
+    p = np.clip(base_inc * seg_uplift * match_q * intensity, 0.0, 0.08)
     draws = rng.random(len(exposure_days)) < p
     picked = exposure_days.loc[draws].reset_index(drop=True)
     if picked.empty:

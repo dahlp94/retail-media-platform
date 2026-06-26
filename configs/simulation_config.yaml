@@ -29,10 +29,26 @@ simulation:
     base_ctr: 0.006  # 0.6% — tune up for search-like placements
     ctr_segment_spread: 0.003  # how much CTR varies by segment (absolute)
 
-  # Outcomes — post-click or view-through style (generator interprets windows separately)
+  # Outcomes — baseline demand + experimentally incremental demand
   conversion:
-    base_click_cvr: 0.045  # 4.5% of clicks convert within attribution window
-    base_view_through_cvr: 0.0008  # orders per impression proxy order; keep small
+    # Baseline daily purchase probability for all members.
+    # This produced realistic control CVR around 3%, so keep it.
+    baseline_daily_order_rate: 0.00055
+
+    # Incremental treatment effect per exposed treatment member-day.
+    # Lowered from fallback/default 0.0035 because treatment lift was too high.
+    incremental_daily_rate_per_exposure_day: 0.0010
+
+    # Keep baseline heterogeneity mild.
+    segment_baseline_mult: [0.88, 0.94, 1.00, 1.08, 1.18]
+
+    # Keep incremental heterogeneity, but not too extreme.
+    segment_incremental_mult: [0.55, 0.78, 1.00, 1.20, 1.40]
+
+    # Attribution-style hooks. Keep these if other scripts use them.
+    base_click_cvr: 0.045
+    base_view_through_cvr: 0.0008
+
     order_value:
       mean_usd: 42.0
       std_usd: 18.0

@@ -23,12 +23,22 @@ SELECT
     absolute_lift,
     incremental_revenue,
     CASE
-        WHEN absolute_lift IS NULL THEN NULL
-        WHEN absolute_lift >= 0.15 THEN 'high_impact'
-        WHEN absolute_lift >= 0.05 AND absolute_lift < 0.15 THEN 'moderate'
-        WHEN absolute_lift >= 0 AND absolute_lift < 0.05 THEN 'low_impact'
-        WHEN absolute_lift < 0 THEN 'inefficient'
-        ELSE NULL
+        WHEN absolute_lift IS NULL
+            OR incremental_revenue IS NULL
+            THEN NULL
+        WHEN absolute_lift >= 0.045
+            AND incremental_revenue >= 3500
+            THEN 'high_impact'
+
+        WHEN absolute_lift >= 0.025
+            AND incremental_revenue >= 2000
+            THEN 'moderate'
+
+        WHEN absolute_lift >= 0.005
+            AND incremental_revenue > 0
+            THEN 'low_impact'
+
+        ELSE 'inefficient'
     END AS efficiency_flag
 FROM marts.experiment_lift_metrics;
 
