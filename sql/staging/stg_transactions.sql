@@ -1,8 +1,4 @@
 -- Staging: purchase / order outcomes
--- Source: raw.transactions (TEXT columns from CSV load)
--- Assumes columns: transaction_id, member_id, retailer_id, audience_segment_id,
---   order_timestamp, order_value_usd, outcome_currency, purchase_driver, source_campaign_id
---   (see data/synthetic/transactions.csv). source_campaign_id may be blank when unknown.
 
 CREATE SCHEMA IF NOT EXISTS staging;
 
@@ -23,6 +19,3 @@ SELECT
         ELSE NULLIF(btrim(source_campaign_id), '')::bigint
     END AS source_campaign_id
 FROM raw.transactions;
-
-COMMENT ON TABLE staging.stg_transactions IS
-    'Typed transactions for revenue KPIs, attribution to source_campaign_id, and lift outcomes.';

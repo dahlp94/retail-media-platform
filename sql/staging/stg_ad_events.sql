@@ -1,8 +1,4 @@
 -- Staging: ad delivery / exposure events
--- Source: raw.ad_events (TEXT columns from CSV load)
--- Assumes columns: event_id, member_id, campaign_id, timestamp, event_type, channel,
---   cost, advertiser_id, retailer_id (see data/synthetic/ad_events.csv).
--- The CSV column "timestamp" is quoted in raw DDL; expose as event_timestamp for analytics.
 
 CREATE SCHEMA IF NOT EXISTS staging;
 
@@ -20,6 +16,3 @@ SELECT
     advertiser_id::integer AS advertiser_id,
     retailer_id::integer AS retailer_id
 FROM raw.ad_events;
-
-COMMENT ON TABLE staging.stg_ad_events IS
-    'Typed ad events for reach, spend, and attribution joins (time-ordered exposure).';
