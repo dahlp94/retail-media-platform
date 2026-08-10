@@ -26,7 +26,7 @@ The core distinction is:
 
 ## What the Project Does
 
-The project creates a synthetic retail-media environment and implements the complete analytical workflow from campaign generation through commercial decision support.
+The project creates a synthetic retail-media environment and implements the analytical workflow from campaign generation through commercial decision support.
 
 ```text
 Synthetic shoppers, advertisers, and campaigns
@@ -65,7 +65,7 @@ The system combines:
 
 ## Experiment Design
 
-### Experimental unit
+### Experimental Unit
 
 The experimental unit is a **member within a campaign**.
 
@@ -108,7 +108,7 @@ The assignment procedure targets an approximately **80/20 treatment-control spli
 
 The project contains two distinct measurement layers.
 
-### 1. Campaign performance
+### 1. Campaign Performance
 
 Standard retail-media metrics include:
 
@@ -125,19 +125,17 @@ Standard retail-media metrics include:
 
 These describe campaign delivery and attributed performance.
 
-### 2. Experimental incrementality
+### 2. Experimental Incrementality
 
 For each campaign, customer outcomes are compared between randomized treatment and control groups.
 
 The primary campaign-level estimator is a difference in means:
 
-[
+$$
 \hat{\tau}=
 
-\bar{Y}_{T}
-
-\bar{Y}_{C}
-]
+\bar{Y}_T - \bar{Y}_C
+$$
 
 where (Y) can represent conversion, orders per member, or revenue per member.
 
@@ -149,7 +147,7 @@ $$
 \hat{p}_T - \hat{p}_C
 $$
 
-where $\hat{p}_T$ and $\hat{p}_C$ are the treatment and control conversion rates.
+where (\hat{p}_T) and (\hat{p}_C) are the treatment and control conversion rates.
 
 Estimated incremental revenue is calculated as:
 
@@ -158,23 +156,23 @@ $$
 
 n_T
 \left(
-\bar{Y}_T^{\text{revenue}}-
+\bar{Y}_T^{\text{revenue}}=
 
 \bar{Y}_C^{\text{revenue}}
 \right)
 $$
 
-where $n_T$ is the number of treatment members and $\bar{Y}_T^{\text{revenue}}$ and $\bar{Y}_C^{\text{revenue}}$ are average revenue per member in the treatment and control groups.
+where (n_T) is the number of treatment members and (\bar{Y}_T^{\text{revenue}}) and (\bar{Y}_C^{\text{revenue}}) are average revenue per member in the treatment and control groups.
 
 This is an **ITT-style treatment-effect estimate** for the synthetic randomized experiment.
- 
+
 ---
 
 ## Current Synthetic Results
 
 All results below are generated from **synthetic data**. They demonstrate the behavior of the analytical system and should not be interpreted as real retailer or advertiser performance.
 
-### Campaign performance
+### Campaign Performance
 
 | Metric                    | Current seed-0 result |
 | ------------------------- | --------------------: |
@@ -190,7 +188,7 @@ All results below are generated from **synthetic data**. They demonstrate the be
 | ROAS                      |                  1.24 |
 | Average revenue per order |                $42.62 |
 
-### Experiment results
+### Experiment Results
 
 Across the current campaign experiments:
 
@@ -209,9 +207,9 @@ Across the current campaign experiments:
 The strongest current point estimate is Campaign 9:
 
 ```text
-Treatment CVR:       9.51%
-Control CVR:         3.94%
-Absolute lift:      +5.57 percentage points
+Treatment CVR:        9.51%
+Control CVR:          3.94%
+Absolute lift:       +5.57 percentage points
 Incremental revenue: ~$4,626
 ```
 
@@ -226,9 +224,9 @@ The central analytical idea of the project is that attributed performance and in
 The current synthetic run reports:
 
 ```text
-Attributed revenue:             $57,964
+Attributed revenue:                    $57,964
 Experimentally estimated
-incremental revenue:            $58,802
+incremental revenue:                   $58,802
 ```
 
 These values happen to be similar in the current simulation, but they are produced by different measurement approaches.
@@ -383,7 +381,7 @@ retail-media-platform/
 
 ## Tech Stack
 
-**Python**
+### Python
 
 * pandas
 * NumPy
@@ -391,16 +389,16 @@ retail-media-platform/
 * psycopg2
 * PyYAML / YAML configuration
 
-**Data**
+### Data
 
 * PostgreSQL
 * SQL
 
-**Testing**
+### Testing
 
 * pytest
 
-**Analysis**
+### Analysis
 
 * Jupyter notebooks
 
@@ -410,7 +408,7 @@ The current project does **not** contain a trained machine-learning model, produ
 
 ## Running the Project
 
-### 1. Create the Python environment
+### 1. Create the Python Environment
 
 ```bash
 python -m venv venv_rmp
@@ -423,7 +421,7 @@ Create `.env` from `.env.example` and configure the PostgreSQL connection.
 
 ---
 
-### 2. Generate synthetic data
+### 2. Generate Synthetic Data
 
 Run the generators in dependency order:
 
@@ -450,16 +448,19 @@ configs/simulation_config.yaml
 
 ---
 
-### 3. Load PostgreSQL
+### 3. Load Data into PostgreSQL
 
 ```bash
 python scripts/load_to_postgres.py
 ```
+
+This loads the generated CSV files into the PostgreSQL `raw` schema.
+
 ---
 
-### 4. Build staging tables
+### 4. Build Staging Tables
 
-Connect to the PostgreSQL database:
+Connect to PostgreSQL:
 
 ```bash
 psql "$DATABASE_URL"
@@ -479,7 +480,7 @@ These transformations convert the raw CSV-loaded tables into typed analytical ta
 
 ---
 
-### 5. Build analytical marts
+### 5. Build Analytical Marts
 
 While still inside the `psql` shell, run the mart SQL files in dependency order:
 
@@ -503,7 +504,7 @@ The experiment marts construct treatment and control outcomes and calculate camp
 
 The final marts rank campaigns and assign efficiency categories used by the recommendation layer.
 
-To leave the PostgreSQL shell when finished:
+To leave PostgreSQL when finished:
 
 ```sql
 \q
@@ -517,7 +518,7 @@ python scripts/run_incrementality.py --export-csv
 
 ---
 
-### 6. Generate campaign recommendations
+### 6. Generate Campaign Recommendations
 
 ```bash
 python scripts/generate_recommendations.py
@@ -531,7 +532,7 @@ data/processed/campaign_recommendations.csv
 
 ---
 
-### 7. Run tests
+### 7. Run Tests
 
 ```bash
 python -m pytest -q
@@ -547,7 +548,7 @@ Current result:
 
 ## Validation
 
-One important experiment integrity check confirms that control members receive no campaign advertising:
+One important experiment-integrity check confirms that control members receive no campaign advertising:
 
 ```sql
 SELECT COUNT(*) AS control_ad_events
@@ -599,21 +600,24 @@ The project currently contains **30 passing tests** covering core simulation and
 
 This project is intentionally focused on randomized retail-media measurement rather than broad platform development.
 
-Current limitations include:
+### No uncertainty estimates yet
 
-**No uncertainty estimates yet.**
 Campaign lift and incremental revenue are currently point estimates. Standard errors, confidence intervals, or bootstrap intervals are the next statistical improvement.
 
-**Synthetic data only.**
+### Synthetic data only
+
 All customers, advertising activity, transactions, campaign results, and revenue are simulated. Reported dollar values demonstrate the analytical workflow and are not real business outcomes.
 
-**No causal ML or uplift model.**
+### No causal ML or uplift model
+
 Segment-level analysis is descriptive subgroup analysis rather than CATE or individualized treatment-effect modeling.
 
-**No observational causal inference.**
+### No observational causal inference
+
 The primary causal design is randomized treatment/control assignment.
 
-**No production application layer.**
+### No production application layer
+
 The repository currently focuses on Python, PostgreSQL, experimentation, and analytical decision support rather than API or dashboard deployment.
 
 ---
