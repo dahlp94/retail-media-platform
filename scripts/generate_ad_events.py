@@ -29,7 +29,7 @@ import pandas as pd
 
 try:
     import yaml
-except ImportError:  # pragma: no cover - optional dependency
+except ImportError:
     yaml = None
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +42,7 @@ OUTPUT_FILENAME = "ad_events.csv"
 
 _FALLBACK_SIM = {
     "simulation": {
-        "random_seed": 42,
+        "random_seed": 0,
         "delivery": {
             "base_impressions_per_campaign_per_day": 5000,
             "impression_volatility": 0.15,
@@ -371,7 +371,7 @@ def main() -> None:
         raise FileNotFoundError(f"Missing members file at {args.members_path}. Run scripts/generate_members.py first.")
 
     sim = load_simulation_config(args.simulation_config)
-    seed = int(sim.get("simulation", sim).get("random_seed", 42))
+    seed = int(sim.get("simulation", sim).get("random_seed", 0))
     rng = np.random.default_rng(seed)
 
     campaigns = pd.read_csv(args.campaigns_path)

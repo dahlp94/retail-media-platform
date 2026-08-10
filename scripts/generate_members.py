@@ -1,5 +1,5 @@
 """
-Generate a synthetic retail **member** (shopper / analysis unit) dimension table.
+Generate a synthetic retail member (shopper / analysis unit) dimension table.
 
 Members align with ``docs/experiment_design.md`` (user-level assignment), ``configs/experiment_config.yaml``
 (outcome currency, geo design scale), and ``configs/simulation_config.yaml`` (retailer count, audience
@@ -27,7 +27,7 @@ import pandas as pd
 
 try:
     import yaml
-except ImportError:  # pragma: no cover - optional dependency
+except ImportError:
     yaml = None
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -39,7 +39,7 @@ OUTPUT_FILENAME = "members.csv"
 # Fallbacks mirror ``configs/simulation_config.yaml`` and ``configs/experiment_config.yaml`` when PyYAML is absent.
 _FALLBACK_SIM = {
     "simulation": {
-        "random_seed": 42,
+        "random_seed": 0,
         "calendar": {"start_date": "2024-01-01", "end_date": "2024-06-30"},
         "entities": {
             "n_retailers": 2,
@@ -173,7 +173,7 @@ def main() -> None:
     experiment = load_experiment_config(args.experiment_config)
 
     sim_root = sim.get("simulation", sim)
-    seed = int(sim_root.get("random_seed", 42))
+    seed = int(sim_root.get("random_seed", 0))
     rng = np.random.default_rng(seed)
 
     df = generate_members_dataframe(args.n_members, sim, experiment, rng)

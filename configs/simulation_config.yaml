@@ -3,7 +3,7 @@
 
 simulation:
   # Reproducibility for audits and CI
-  random_seed: 42
+  random_seed: 0
 
   # Calendar span for synthetic events (inclusive-ish daily grain in generator)
   calendar:

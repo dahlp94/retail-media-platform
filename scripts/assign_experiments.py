@@ -28,7 +28,7 @@ import pandas as pd
 
 try:
     import yaml
-except ImportError:  # pragma: no cover - optional dependency
+except ImportError:
     yaml = None
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -39,7 +39,7 @@ DEFAULT_CAMPAIGNS_PATH = REPO_ROOT / "data" / "synthetic" / "campaigns.csv"
 OUTPUT_DIR = REPO_ROOT / "data" / "synthetic"
 OUTPUT_FILENAME = "campaign_experiment_assignments.csv"
 
-_FALLBACK_SIM = {"simulation": {"random_seed": 42}}
+_FALLBACK_SIM = {"simulation": {"random_seed": 0}}
 _FALLBACK_EXPERIMENT = {
     "experiment": {
         "design": {"unit": "user", "assignment": "randomized_holdout"},
@@ -196,7 +196,7 @@ def main() -> None:
     sim = load_simulation_config(args.simulation_config)
     exp = load_experiment_config(args.experiment_config)
 
-    seed = int(sim.get("simulation", sim).get("random_seed", 42))
+    seed = int(sim.get("simulation", sim).get("random_seed", 0))
     exp_root = exp.get("experiment", exp)
     design = exp_root.get("design", {})
     assignment_method = str(design.get("assignment", "randomized_holdout"))

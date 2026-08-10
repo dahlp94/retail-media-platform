@@ -1,5 +1,5 @@
 """
-Generate a synthetic **advertiser** dimension table for the retail media network.
+Generate a synthetic advertiser dimension table for the retail media network.
 
 Row count and retailer linkage follow ``configs/simulation_config.yaml`` (``n_advertisers``, ``n_retailers``).
 Calendar bounds from the same file anchor ``created_at``. Randomness uses the configured ``random_seed``
@@ -7,7 +7,7 @@ so runs are reproducible for audits and CI (see simulation config header comment
 
 Outputs
 -------
-``data/synthetic/advertisers.csv`` — one row per advertiser with stable integer ``advertiser_id``.
+``data/synthetic/advertisers.csv`` -- one row per advertiser with stable integer ``advertiser_id``.
 
 If `PyYAML` is installed, values are read from ``configs/simulation_config.yaml``; otherwise built-in
 defaults match the checked-in file for the keys this script uses.
@@ -25,7 +25,7 @@ import pandas as pd
 
 try:
     import yaml
-except ImportError:  # pragma: no cover - optional dependency
+except ImportError:
     yaml = None
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +35,7 @@ OUTPUT_FILENAME = "advertisers.csv"
 
 _FALLBACK_SIM = {
     "simulation": {
-        "random_seed": 42,
+        "random_seed": 0,
         "calendar": {"start_date": "2024-01-01", "end_date": "2024-06-30"},
         "entities": {"n_retailers": 2, "n_advertisers": 8},
     }
@@ -141,7 +141,7 @@ def main() -> None:
     args = _parse_args()
     sim = load_simulation_config(args.simulation_config)
     sim_root = sim.get("simulation", sim)
-    seed = int(sim_root.get("random_seed", 42))
+    seed = int(sim_root.get("random_seed", 0))
     rng = np.random.default_rng(seed)
 
     df = generate_advertisers_dataframe(sim, rng)

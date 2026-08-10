@@ -26,7 +26,7 @@ import pandas as pd
 
 try:
     import yaml
-except ImportError:  # pragma: no cover - optional dependency
+except ImportError:
     yaml = None
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -38,7 +38,7 @@ OUTPUT_FILENAME = "campaigns.csv"
 
 _FALLBACK_SIM = {
     "simulation": {
-        "random_seed": 42,
+        "random_seed": 0,
         "calendar": {"start_date": "2024-01-01", "end_date": "2024-06-30"},
         "entities": {
             "n_campaigns": 24,
@@ -192,7 +192,7 @@ def main() -> None:
     args = _parse_args()
     sim = load_simulation_config(args.simulation_config)
     sim_root = sim.get("simulation", sim)
-    seed = int(sim_root.get("random_seed", 42))
+    seed = int(sim_root.get("random_seed", 0))
     rng = np.random.default_rng(seed)
 
     if not args.advertisers_path.is_file():
