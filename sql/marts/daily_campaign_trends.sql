@@ -1,8 +1,4 @@
--- Marts: daily campaign metrics for trend charts and exploration
--- Inputs: staging.stg_ad_events (delivery by event date), staging.stg_transactions (attributed orders by order date)
--- Grain: one row per (report_date, campaign_id) with activity on that day in either feed
--- Note: Delivery uses DATE(event_timestamp); outcomes use DATE(order_timestamp)—same campaign may show
---   spend on one day and revenue on another when the attribution lag crosses midnight.
+-- Daily campaign performance metrics for trend analysis
 
 CREATE SCHEMA IF NOT EXISTS marts;
 
@@ -44,11 +40,3 @@ FROM daily_ad AS a
 FULL OUTER JOIN daily_attributed_orders AS o
     ON a.campaign_id = o.campaign_id
     AND a.report_date = o.report_date;
-
-COMMENT ON TABLE marts.daily_campaign_trends IS
-    'Daily delivery and attributed outcomes per campaign; CTR/CVR/ROAS use same-day ad and order rows.';
-
-COMMENT ON COLUMN marts.daily_campaign_trends.report_date IS 'Calendar date: event date for delivery, order date for revenue.';
-COMMENT ON COLUMN marts.daily_campaign_trends.ctr IS 'Daily CTR: clicks / impressions on report_date (NULL if no impressions).';
-COMMENT ON COLUMN marts.daily_campaign_trends.cvr IS 'Daily click CVR: orders / clicks on report_date (NULL if no clicks that day).';
-COMMENT ON COLUMN marts.daily_campaign_trends.roas IS 'Daily ROAS: revenue_usd / spend_usd on report_date (NULL if no spend).';
