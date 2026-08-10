@@ -132,10 +132,9 @@ For each campaign, customer outcomes are compared between randomized treatment a
 The primary campaign-level estimator is a difference in means:
 
 [
-\hat{\tau}
-==========
+\hat{\tau}=
 
-## \bar{Y}_{T}
+\bar{Y}_{T}
 
 \bar{Y}_{C}
 ]
@@ -144,32 +143,31 @@ where (Y) can represent conversion, orders per member, or revenue per member.
 
 For conversion:
 
-[
-\text{Absolute Lift}
-====================
+$$
+\text{Absolute Lift}=
 
-## \hat{p}_{T}
+\hat{p}_T - \hat{p}_C
+$$
 
-\hat{p}_{C}
-]
+where $\hat{p}_T$ and $\hat{p}_C$ are the treatment and control conversion rates.
 
 Estimated incremental revenue is calculated as:
 
-[
-\widehat{\text{Incremental Revenue}}
-====================================
+$$
+\widehat{\text{Incremental Revenue}}=
 
 n_T
 \left(
-\bar{Y}_{T}^{revenue}
----------------------
+\bar{Y}_T^{\text{revenue}}-
 
-\bar{Y}_{C}^{revenue}
+\bar{Y}_C^{\text{revenue}}
 \right)
-]
+$$
+
+where $n_T$ is the number of treatment members and $\bar{Y}_T^{\text{revenue}}$ and $\bar{Y}_C^{\text{revenue}}$ are average revenue per member in the treatment and control groups.
 
 This is an **ITT-style treatment-effect estimate** for the synthetic randomized experiment.
-
+ 
 ---
 
 ## Current Synthetic Results
