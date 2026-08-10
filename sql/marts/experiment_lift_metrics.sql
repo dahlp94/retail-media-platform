@@ -1,42 +1,12 @@
--- Marts: campaign-level experiment lift (treatment vs control)
--- Inputs:
---   - staging.stg_experiment_assignment
---   - staging.stg_campaigns
---   - staging.stg_transactions
---
--- Grain:
---   - one row per campaign_id
---
--- Outcome definition:
---   Members are the experiment units assigned to a campaign.
---   Outcomes are measured using all observed transactions for assigned members
---   during the campaign window [start_date, end_date], regardless of source_campaign_id.
---
--- Design principle:
---   This table measures experimental incrementality, not attribution.
---   Attribution fields such as source_campaign_id may be used in descriptive
---   campaign reporting elsewhere, but they are intentionally excluded here
---   from the outcome definition.
---
--- Key metrics:
---   - treatment/control conversion rate
---   - absolute lift
---   - relative lift
---   - incremental orders
---   - incremental revenue
---
--- Incremental totals:
---   incremental_orders
---       = n_treatment * (orders_per_member_treatment - orders_per_member_control)
---
---   incremental_revenue
---       = n_treatment * (revenue_per_member_treatment - revenue_per_member_control)
+-- Campaign-level treatment/control incrementality metrics.
+-- Outcomes include all member purchases during the campaign window.
 
 CREATE SCHEMA IF NOT EXISTS marts;
 
 DROP TABLE IF EXISTS marts.experiment_lift_metrics;
 
 CREATE TABLE marts.experiment_lift_metrics AS
+
 WITH experiment_population AS (
     SELECT
         a.campaign_id,
@@ -55,7 +25,7 @@ member_outcomes AS (
         ep.campaign_id,
         ep.member_id,
         ep.experiment_arm,
-        COUNT(t.transaction_id)::bigint AS order_cnt,
+        COUNT(t.transaction_id)::bigint AS order_count,
         COALESCE(SUM(t.order_value_usd), 0)::numeric(18, 2) AS revenue_usd,
         CASE
             WHEN COUNT(t.transaction_id) > 0 THEN 1
@@ -64,67 +34,99 @@ member_outcomes AS (
     FROM experiment_population AS ep
     LEFT JOIN staging.stg_transactions AS t
         ON t.member_id = ep.member_id
-       AND t.order_timestamp::date BETWEEN ep.start_date AND ep.end_date
+        AND t.order_timestamp::date BETWEEN ep.start_date AND ep.end_date
     GROUP BY
         ep.campaign_id,
         ep.member_id,
         ep.experiment_arm
 ),
 
-arm_agg AS (
+arm_metrics AS (
     SELECT
         campaign_id,
         experiment_arm,
-        COUNT(*)::bigint AS n_members,
+        COUNT(*)::bigint AS member_count,
         SUM(is_converter)::bigint AS converters,
-        COALESCE(SUM(order_cnt), 0)::bigint AS total_orders,
-        COALESCE(SUM(revenue_usd), 0)::numeric(18, 2) AS total_revenue,
+        SUM(order_count)::bigint AS orders,
+        SUM(revenue_usd)::numeric(18, 2) AS revenue,
         AVG(is_converter::numeric)::numeric(18, 8) AS conversion_rate,
-        AVG(order_cnt::numeric)::numeric(18, 8) AS orders_per_member,
+        AVG(order_count::numeric)::numeric(18, 8) AS orders_per_member,
         AVG(revenue_usd)::numeric(18, 8) AS revenue_per_member
     FROM member_outcomes
-    GROUP BY campaign_id, experiment_arm
+    GROUP BY
+        campaign_id,
+        experiment_arm
 ),
 
-by_campaign AS (
+campaign_metrics AS (
     SELECT
         campaign_id,
 
-        COALESCE(MAX(CASE WHEN experiment_arm = 'treatment' THEN n_members END), 0)::bigint
-            AS treatment_member_count,
-        COALESCE(MAX(CASE WHEN experiment_arm = 'control' THEN n_members END), 0)::bigint
-            AS control_member_count,
+        COALESCE(
+            MAX(member_count) FILTER (WHERE experiment_arm = 'treatment'),
+            0
+        )::bigint AS treatment_member_count,
 
-        COALESCE(MAX(CASE WHEN experiment_arm = 'treatment' THEN converters END), 0)::bigint
-            AS treatment_converters,
-        COALESCE(MAX(CASE WHEN experiment_arm = 'control' THEN converters END), 0)::bigint
-            AS control_converters,
+        COALESCE(
+            MAX(member_count) FILTER (WHERE experiment_arm = 'control'),
+            0
+        )::bigint AS control_member_count,
 
-        COALESCE(MAX(CASE WHEN experiment_arm = 'treatment' THEN total_orders END), 0)::bigint
-            AS treatment_orders,
-        COALESCE(MAX(CASE WHEN experiment_arm = 'control' THEN total_orders END), 0)::bigint
-            AS control_orders,
+        COALESCE(
+            MAX(converters) FILTER (WHERE experiment_arm = 'treatment'),
+            0
+        )::bigint AS treatment_converters,
 
-        COALESCE(MAX(CASE WHEN experiment_arm = 'treatment' THEN total_revenue END), 0)::numeric(18, 2)
-            AS treatment_revenue,
-        COALESCE(MAX(CASE WHEN experiment_arm = 'control' THEN total_revenue END), 0)::numeric(18, 2)
-            AS control_revenue,
+        COALESCE(
+            MAX(converters) FILTER (WHERE experiment_arm = 'control'),
+            0
+        )::bigint AS control_converters,
 
-        MAX(CASE WHEN experiment_arm = 'treatment' THEN conversion_rate END)::numeric(18, 8)
-            AS treatment_conversion_rate,
-        MAX(CASE WHEN experiment_arm = 'control' THEN conversion_rate END)::numeric(18, 8)
-            AS control_conversion_rate,
+        COALESCE(
+            MAX(orders) FILTER (WHERE experiment_arm = 'treatment'),
+            0
+        )::bigint AS treatment_orders,
 
-        MAX(CASE WHEN experiment_arm = 'treatment' THEN orders_per_member END)::numeric(18, 8)
-            AS treatment_orders_per_member,
-        MAX(CASE WHEN experiment_arm = 'control' THEN orders_per_member END)::numeric(18, 8)
-            AS control_orders_per_member,
+        COALESCE(
+            MAX(orders) FILTER (WHERE experiment_arm = 'control'),
+            0
+        )::bigint AS control_orders,
 
-        MAX(CASE WHEN experiment_arm = 'treatment' THEN revenue_per_member END)::numeric(18, 8)
-            AS treatment_revenue_per_member,
-        MAX(CASE WHEN experiment_arm = 'control' THEN revenue_per_member END)::numeric(18, 8)
-            AS control_revenue_per_member
-    FROM arm_agg
+        COALESCE(
+            MAX(revenue) FILTER (WHERE experiment_arm = 'treatment'),
+            0
+        )::numeric(18, 2) AS treatment_revenue,
+
+        COALESCE(
+            MAX(revenue) FILTER (WHERE experiment_arm = 'control'),
+            0
+        )::numeric(18, 2) AS control_revenue,
+
+        MAX(conversion_rate) FILTER (
+            WHERE experiment_arm = 'treatment'
+        )::numeric(18, 8) AS treatment_conversion_rate,
+
+        MAX(conversion_rate) FILTER (
+            WHERE experiment_arm = 'control'
+        )::numeric(18, 8) AS control_conversion_rate,
+
+        MAX(orders_per_member) FILTER (
+            WHERE experiment_arm = 'treatment'
+        )::numeric(18, 8) AS treatment_orders_per_member,
+
+        MAX(orders_per_member) FILTER (
+            WHERE experiment_arm = 'control'
+        )::numeric(18, 8) AS control_orders_per_member,
+
+        MAX(revenue_per_member) FILTER (
+            WHERE experiment_arm = 'treatment'
+        )::numeric(18, 8) AS treatment_revenue_per_member,
+
+        MAX(revenue_per_member) FILTER (
+            WHERE experiment_arm = 'control'
+        )::numeric(18, 8) AS control_revenue_per_member
+
+    FROM arm_metrics
     GROUP BY campaign_id
 )
 
@@ -144,13 +146,10 @@ SELECT
     (treatment_conversion_rate - control_conversion_rate)::numeric(18, 8)
         AS absolute_lift,
 
-    CASE
-        WHEN control_conversion_rate IS NULL OR control_conversion_rate = 0 THEN NULL
-        ELSE (
-            (treatment_conversion_rate - control_conversion_rate)
-            / control_conversion_rate
-        )::numeric(18, 8)
-    END AS relative_lift,
+    (
+        (treatment_conversion_rate - control_conversion_rate)
+        / NULLIF(control_conversion_rate, 0)
+    )::numeric(18, 8) AS relative_lift,
 
     (treatment_orders_per_member - control_orders_per_member)::numeric(18, 8)
         AS incremental_orders_per_member,
@@ -159,62 +158,24 @@ SELECT
         AS incremental_revenue_per_member,
 
     CASE
-        WHEN treatment_member_count > 0 AND control_member_count > 0 THEN
-            (
-                treatment_member_count::numeric
-                * (treatment_orders_per_member - control_orders_per_member)
-            )::numeric(18, 4)
+        WHEN treatment_member_count > 0
+             AND control_member_count > 0
+        THEN (
+            treatment_member_count::numeric
+            * (treatment_orders_per_member - control_orders_per_member)
+        )::numeric(18, 4)
         ELSE NULL
     END AS incremental_orders,
 
     CASE
-        WHEN treatment_member_count > 0 AND control_member_count > 0 THEN
-            (
-                treatment_member_count::numeric
-                * (treatment_revenue_per_member - control_revenue_per_member)
-            )::numeric(18, 2)
+        WHEN treatment_member_count > 0
+             AND control_member_count > 0
+        THEN (
+            treatment_member_count::numeric
+            * (treatment_revenue_per_member - control_revenue_per_member)
+        )::numeric(18, 2)
         ELSE NULL
     END AS incremental_revenue
-FROM by_campaign;
 
-COMMENT ON TABLE marts.experiment_lift_metrics IS
-    'Campaign-level experimental lift table using treatment/control assignment and all member transactions during the campaign window, independent of attribution tagging.';
+FROM campaign_metrics;
 
-COMMENT ON COLUMN marts.experiment_lift_metrics.campaign_id IS
-    'Campaign identifier from experiment assignment and campaign metadata.';
-
-COMMENT ON COLUMN marts.experiment_lift_metrics.treatment_member_count IS
-    'Assigned members in the treatment arm.';
-
-COMMENT ON COLUMN marts.experiment_lift_metrics.control_member_count IS
-    'Assigned members in the control arm.';
-
-COMMENT ON COLUMN marts.experiment_lift_metrics.treatment_converters IS
-    'Treatment-assigned members with at least one transaction during the campaign window.';
-
-COMMENT ON COLUMN marts.experiment_lift_metrics.control_converters IS
-    'Control-assigned members with at least one transaction during the campaign window.';
-
-COMMENT ON COLUMN marts.experiment_lift_metrics.treatment_conversion_rate IS
-    'Share of treatment-assigned members with at least one transaction during the campaign window.';
-
-COMMENT ON COLUMN marts.experiment_lift_metrics.control_conversion_rate IS
-    'Share of control-assigned members with at least one transaction during the campaign window.';
-
-COMMENT ON COLUMN marts.experiment_lift_metrics.absolute_lift IS
-    'Treatment conversion rate minus control conversion rate.';
-
-COMMENT ON COLUMN marts.experiment_lift_metrics.relative_lift IS
-    'Absolute lift divided by control conversion rate; NULL when control conversion rate is zero or undefined.';
-
-COMMENT ON COLUMN marts.experiment_lift_metrics.incremental_orders_per_member IS
-    'Difference in average orders per assigned member between treatment and control.';
-
-COMMENT ON COLUMN marts.experiment_lift_metrics.incremental_revenue_per_member IS
-    'Difference in average revenue per assigned member between treatment and control.';
-
-COMMENT ON COLUMN marts.experiment_lift_metrics.incremental_orders IS
-    'Estimated incremental orders in treatment relative to the control benchmark using per-member order differences.';
-
-COMMENT ON COLUMN marts.experiment_lift_metrics.incremental_revenue IS
-    'Estimated incremental revenue in treatment relative to the control benchmark using per-member revenue differences.';
