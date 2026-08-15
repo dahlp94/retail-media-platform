@@ -26,12 +26,11 @@ experiment:
     metric: revenue_per_user  # revenue_per_user | conversion_rate | orders_per_user
     currency: USD
 
-  # Lift statistics (placeholders for notebook / service)
+  # Lift statistics used by app/statistics/experiment_inference.py
   estimation:
     relative_lift_formula: treatment_mean_minus_control_over_control
     confidence_level: 0.95
-    # When true, analysis modules may use bootstrap; false = analytic SE only if implemented
-    bootstrap_iterations: 500
+    bootstrap_iterations: 1000
 
   # Geo design knobs (used when assignment: geo_holdout)
   geo:

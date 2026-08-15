@@ -2,13 +2,11 @@
 
 This document describes how **treatment** and **control** groups support **incremental** measurement in retail media: holdouts, timing, and how **lift** is calculated. It is written for business owners of tests and for analysts implementing them.
 
----
 
 ## Why experiments matter
 
 **Attribution** assigns credit to touchpoints along observed paths; it does not by itself prove that the ad **caused** the outcome. **Experiments** (or rigorous quasi-experiments) compare outcomes between groups that differ **only** in exposure to the campaign, so measured differences support **causal** statements about incrementality within stated assumptions.
 
----
 
 ## Treatment and control
 
@@ -32,7 +30,6 @@ The **control** group consists of comparable units that are **held out** from th
 
 This platform assumes designs that yield a clear **binary or multi-cell** treatment indicator per analysis unit and period; advanced designs (switchback, synthetic control) can follow the same **lift** logic with appropriate baseline modeling.
 
----
 
 ## Holdouts
 
@@ -45,7 +42,6 @@ A **holdout** is the subset of the eligible population **intentionally not expos
 - **Ethics and fairness:** Holdouts should respect partner policies and not withhold critical information where policy requires parity.
 - **Leakage:** If holdout users see the same message through other channels, measured lift is **diluted** (underestimated incremental impact).
 
----
 
 ## Analysis windows
 
@@ -65,7 +61,6 @@ Some teams extend the window slightly beyond last spend to capture **delayed con
 
 **Rule of thumb:** Define windows **up front** in the test plan to avoid **peeking** bias; if interim reads are needed, use pre-specified checkpoints or statistical adjustments.
 
----
 
 ## How lift is calculated
 
@@ -108,7 +103,21 @@ When treatment and control **sizes differ** or weights apply, use **population-w
 
 ### Uncertainty
 
-In practice, report **confidence intervals** or **credibility intervals** for lift and incremental revenue (e.g., from standard errors, bootstrap, or Bayesian models). Narrow holdouts and noisy outcomes widen intervals.
+The estimand is the ITT-style difference in mean member outcomes between randomized treatment and control within each campaign.
+
+**Conversion (binary purchase in the campaign window).** Absolute lift \(\hat\tau = \hat p_T - \hat p_C\) uses the independent-arm Wald standard error
+
+\[
+\mathrm{SE}(\hat\tau)=\sqrt{\frac{\hat p_T(1-\hat p_T)}{n_T}+\frac{\hat p_C(1-\hat p_C)}{n_C}}
+\]
+
+and a 95% interval \(\hat\tau \pm z_{0.975}\mathrm{SE}\) with \(z_{0.975}\approx 1.959964\). A two-sided z-test of \(H_0:\ p_T-p_C=0\) is reported as a diagnostic; it is not the primary decision rule.
+
+**Orders and revenue.** These are skewed member-level outcomes, so uncertainty is a **percentile bootstrap**. For each campaign, every assigned member is an observation (non-purchasers contribute 0 orders and $0 revenue). Treatment and control members are resampled **separately with replacement**, preserving original arm sizes. Each replicate recomputes per-member differences and scales incremental totals as \(n_T \times (\bar Y_T - \bar Y_C)\). The interval uses the 2.5th and 97.5th percentiles of the bootstrap distribution (configurable via `experiment.estimation.confidence_level` and `bootstrap_iterations`).
+
+**Interpretation (synthetic example).** An absolute conversion lift of +2.8 percentage points with 95% CI [+0.9 pp, +4.7 pp] means the observed treatment group converted 2.8 percentage points more than control, with sampling uncertainty quantified by the experiment. These figures come from a synthetic holdout, not live advertiser results.
+
+Narrow holdouts and rare outcomes widen intervals. Wald intervals can collapse when an arm has \(\hat p \in \{0,1\}\); that is a known limitation of the binomial variance estimator, not evidence of infinite precision.
 
 ### iROAS linkage
 
@@ -120,7 +129,6 @@ With **incremental revenue** and **treatment-side spend** (or incremental spend 
 
 Spend in the denominator should match **what incremental budget** the test is evaluating (e.g., incremental CPM/CPC in treatment geos only).
 
----
 
 ## Summary
 

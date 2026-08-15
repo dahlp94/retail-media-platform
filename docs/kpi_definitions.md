@@ -2,7 +2,6 @@
 
 This document defines the core retail media metrics used in this platform. Definitions are written for business stakeholders; formulas use standard industry meaning so engineering and analytics can implement them consistently.
 
----
 
 ## Delivery and engagement
 
@@ -43,7 +42,6 @@ The **numerator** must use the same attribution rules as the rest of the report 
 
 **Interpretation:** Efficiency of traffic or of impression-to-outcome paths; compare across segments only when definitions align.
 
----
 
 ## Spend and outcomes
 
@@ -75,7 +73,6 @@ A ROAS of **4** means **\$4 of attributed revenue per \$1 spent** (units must be
 
 **Interpretation:** Useful for **budget pacing and mix** under a fixed attribution scheme; **not** interchangeable with incremental return unless attribution equals true incrementality (it usually does not).
 
----
 
 ## Incrementality and lift
 
@@ -90,6 +87,8 @@ A ROAS of **4** means **\$4 of attributed revenue per \$1 spent** (units must be
 where \(\bar{Y}\) is the mean outcome (e.g., conversion rate, orders per user, revenue per household) over the analysis window. Lift is often expressed as a **percentage** (e.g., 12% lift).
 
 **Requirements:** Treatment and control must be defined by the **experiment or quasi-experiment** design; lift is **not** derived from attribution weights alone.
+
+**Absolute conversion lift** in this project is \(\hat p_T - \hat p_C\), with a Wald two-sample standard error and 95% confidence interval. Orders-per-member and revenue-per-member lift (and the \(n_T\)-scaled incremental totals) use a member-level percentile bootstrap within experimental arm. See `docs/experiment_design.md`.
 
 ### Incremental revenue
 
@@ -113,7 +112,6 @@ In randomized holdouts, the baseline is observed **control** revenue scaled to t
 
 This is the **causal** analogue of ROAS when incremental revenue comes from a valid lift study. **iROAS** can be **lower than ROAS** when attribution **over-credits** the campaign, or **higher** when attribution **under-credits** (less common but possible depending on model and path complexity).
 
----
 
 ## How these KPIs work together
 

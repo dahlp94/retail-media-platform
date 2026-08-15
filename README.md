@@ -22,7 +22,6 @@ The core distinction is:
 
 **Incrementality:** How much additional customer behavior occurred because shoppers were assigned to the advertising treatment?
 
----
 
 ## What the Project Does
 
@@ -61,7 +60,6 @@ The system combines:
 * **Commercial analytics** for connecting campaign performance to budget recommendations
 * **pytest** for validating data generation, experiment assignment, and analytical logic
 
----
 
 ## Experiment Design
 
@@ -102,7 +100,6 @@ The current seed-0 simulation contains:
 
 The assignment procedure targets an approximately **80/20 treatment-control split** while maintaining roughly 500 control members per campaign.
 
----
 
 ## What Is Measured
 
@@ -166,7 +163,6 @@ where (n_T) is the number of treatment members and (\bar{Y}_T^{\text{revenue}}) 
 
 This is an **ITT-style treatment-effect estimate** for the synthetic randomized experiment.
 
----
 
 ## Current Synthetic Results
 
@@ -213,9 +209,8 @@ Absolute lift:       +5.57 percentage points
 Incremental revenue: ~$4,626
 ```
 
-These are **point estimates from a synthetic randomized experiment**. Statistical confidence intervals are not yet implemented.
+These are **point estimates from a synthetic randomized experiment**, now reported with statistical uncertainty (analytic 95% CIs for conversion lift; member-level bootstrap 95% CIs for incremental orders and revenue). They are not live advertiser results.
 
----
 
 ## Attribution vs. Incrementality
 
@@ -237,7 +232,6 @@ These values happen to be similar in the current simulation, but they are produc
 
 The purpose of the project is not to demonstrate a particular dollar result. It is to demonstrate the analytical framework required to distinguish the two.
 
----
 
 ## Commercial Decision Layer
 
@@ -265,7 +259,6 @@ The recommendation engine is intentionally **rule based**. It is not a machine-l
 
 Its purpose is to demonstrate how experimental results can be translated into an interpretable commercial action.
 
----
 
 ## Data Architecture
 
@@ -299,6 +292,7 @@ marts.daily_campaign_trends
 marts.executive_summary_metrics
 
 marts.experiment_lift_metrics
+marts.experiment_member_outcomes
 marts.segment_performance_metrics
 
 marts.campaign_incrementality_rankings
@@ -317,15 +311,16 @@ The SQL layer demonstrates analytical patterns including:
 * window functions and `RANK()`
 * campaign-level KPI rollups
 
----
 
 ## Repository Structure
 
 ```text
 retail-media-platform/
 ├── app/
-│   └── core/
-│       └── database.py
+│   ├── core/
+│   │   └── database.py
+│   └── statistics/
+│       └── experiment_inference.py
 │
 ├── configs/
 │   ├── experiment_config.yaml
@@ -377,7 +372,6 @@ retail-media-platform/
 └── README.md
 ```
 
----
 
 ## Tech Stack
 
@@ -404,7 +398,6 @@ retail-media-platform/
 
 The current project does **not** contain a trained machine-learning model, production API, deployed dashboard, or MLflow experiment-tracking workflow.
 
----
 
 ## Running the Project
 
@@ -419,7 +412,6 @@ pip install -r requirements.txt
 
 Create `.env` from `.env.example` and configure the PostgreSQL connection.
 
----
 
 ### 2. Generate Synthetic Data
 
@@ -446,7 +438,6 @@ The simulation seed is configured in:
 configs/simulation_config.yaml
 ```
 
----
 
 ### 3. Load Data into PostgreSQL
 
@@ -456,7 +447,6 @@ python scripts/load_to_postgres.py
 
 This loads the generated CSV files into the PostgreSQL `raw` schema.
 
----
 
 ### 4. Build Staging Tables
 
@@ -478,7 +468,6 @@ Then, from inside the `psql` shell, run the staging SQL files in dependency orde
 
 These transformations convert the raw CSV-loaded tables into typed analytical tables under the `staging` schema.
 
----
 
 ### 5. Build Analytical Marts
 
@@ -492,6 +481,7 @@ While still inside the `psql` shell, run the mart SQL files in dependency order:
 \i sql/marts/executive_summary_metrics.sql
 
 \i sql/marts/experiment_lift_metrics.sql
+\i sql/marts/experiment_member_outcomes.sql
 \i sql/marts/segment_performance_metrics.sql
 
 \i sql/marts/campaign_incrementality_rankings.sql
@@ -510,13 +500,12 @@ To leave PostgreSQL when finished:
 \q
 ```
 
-The incrementality marts can also be rebuilt and exported to CSV from Python with:
+The incrementality marts can also be rebuilt from Python. This step attaches conversion-lift standard errors and member-level bootstrap intervals to `marts.experiment_lift_metrics`, then optionally exports CSV:
 
 ```bash
 python scripts/run_incrementality.py --export-csv
 ```
 
----
 
 ### 6. Generate Campaign Recommendations
 
@@ -530,7 +519,6 @@ Output:
 data/processed/campaign_recommendations.csv
 ```
 
----
 
 ### 7. Run Tests
 
@@ -544,7 +532,6 @@ Current result:
 30 passed
 ```
 
----
 
 ## Validation
 
@@ -581,28 +568,32 @@ FROM marts.experiment_lift_metrics
 ORDER BY incremental_revenue DESC;
 ```
 
----
 
 ## Testing
 
-The project currently contains **30 passing tests** covering core simulation and analytical logic, including:
+The project tests core simulation and analytical logic, including:
 
 * generated data structure
 * randomized experiment assignment
 * treatment/control logic
 * metric calculations
 * incrementality calculations
+* conversion-lift standard errors, confidence intervals, and p-values
+* member-level bootstrap behavior for orders and revenue
 * deterministic recommendation behavior
 
----
 
 ## Current Limitations
 
 This project is intentionally focused on randomized retail-media measurement rather than broad platform development.
 
-### No uncertainty estimates yet
+### Wald intervals for conversion can be degenerate
 
-Campaign lift and incremental revenue are currently point estimates. Standard errors, confidence intervals, or bootstrap intervals are the next statistical improvement.
+When an arm has conversion rate 0 or 1, the binomial variance estimate is zero. The implementation returns a collapsed interval rather than dividing by zero; that is a limitation of the Wald SE, not infinite precision.
+
+### Bootstrap is percentile, not BCa
+
+Orders and revenue use a stratified member-level percentile bootstrap. Bias-corrected intervals are not implemented.
 
 ### Synthetic data only
 
@@ -620,19 +611,16 @@ The primary causal design is randomized treatment/control assignment.
 
 The repository currently focuses on Python, PostgreSQL, experimentation, and analytical decision support rather than API or dashboard deployment.
 
----
 
 ## Next Improvements
 
 The highest-value next additions are:
 
-1. Add standard errors and 95% confidence intervals for campaign lift and incremental revenue.
-2. Align segment-level outcome definitions with the primary campaign experiment.
-3. Add a single reproducible command for rebuilding staging tables, marts, and analytical outputs.
-4. Build a concise attribution-vs-incrementality comparison view for campaign decision making.
-5. Add a lightweight dashboard only after the statistical layer is complete.
+1. Align segment-level outcome definitions with the primary campaign experiment.
+2. Add a single reproducible command for rebuilding staging tables, marts, and analytical outputs.
+3. Build a concise attribution-vs-incrementality comparison view for campaign decision making.
+4. Add a lightweight dashboard only after the statistical layer is complete.
 
----
 
 ## Why This Project Matters
 

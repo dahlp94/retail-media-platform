@@ -1,5 +1,7 @@
 -- Campaign-level treatment/control incrementality metrics.
 -- Outcomes include all member purchases during the campaign window.
+-- Point estimates only. Uncertainty columns are added by
+-- scripts/run_incrementality.py from marts.experiment_member_outcomes.
 
 CREATE SCHEMA IF NOT EXISTS marts;
 
