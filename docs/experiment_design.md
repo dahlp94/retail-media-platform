@@ -121,13 +121,23 @@ Narrow holdouts and rare outcomes widen intervals. Wald intervals can collapse w
 
 ### iROAS linkage
 
-With **incremental revenue** and **treatment-side spend** (or incremental spend vs. control):
+With **incremental revenue** and **observed campaign spend**:
 
 \[
-\text{iROAS} = \frac{\text{Incremental revenue}}{\text{Spend (attributed to the test)}}
+\text{iROAS} = \frac{\text{Incremental revenue}}{\text{Spend}}
 \]
 
-Spend in the denominator should match **what incremental budget** the test is evaluating (e.g., incremental CPM/CPC in treatment geos only).
+This project treats campaign spend as fixed, so the incremental-revenue confidence interval is divided by the same spend:
+
+\[
+\text{iROAS CI} = \left[\frac{\text{incremental revenue CI lower}}{\text{spend}},\ \frac{\text{incremental revenue CI upper}}{\text{spend}}\right]
+\]
+
+If spend is zero or missing, iROAS is undefined. iROAS is not the same quantity as attributed ROAS.
+
+### Experiment health
+
+Campaign-level integrity checks (sample-ratio mismatch, control exposure leakage, duplicate assignments, outcome completeness, and pre-treatment standardized differences) determine whether a lift estimate should be interpreted. A failed health check withholds the causal decision even when the point estimate looks strong. Planned power and planned MDE are not reconstructed from the synthetic generator.
 
 
 ## Summary

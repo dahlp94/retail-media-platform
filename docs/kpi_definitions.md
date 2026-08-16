@@ -112,6 +112,8 @@ In randomized holdouts, the baseline is observed **control** revenue scaled to t
 
 This is the **causal** analogue of ROAS when incremental revenue comes from a valid lift study. **iROAS** can be **lower than ROAS** when attribution **over-credits** the campaign, or **higher** when attribution **under-credits** (less common but possible depending on model and path complexity).
 
+In this project, spend is treated as observed and fixed, so the iROAS interval is the incremental-revenue interval divided by spend. Zero spend leaves iROAS undefined.
+
 
 ## How these KPIs work together
 

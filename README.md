@@ -46,10 +46,13 @@ Typed staging tables
 Campaign KPI and experiment marts
                 |
                 v
-Treatment-control lift estimates
+Treatment-control lift estimates + uncertainty
                 |
                 v
-Campaign rankings and budget recommendations
+Experiment-health diagnostics
+                |
+                v
+Attribution vs incrementality decision table
 ```
 
 The system combines:
@@ -232,12 +235,53 @@ These values happen to be similar in the current simulation, but they are produc
 
 The purpose of the project is not to demonstrate a particular dollar result. It is to demonstrate the analytical framework required to distinguish the two.
 
+The Stage 4 decision table makes the same distinction with two return metrics:
+
+```text
+ROAS  = attributed revenue / spend
+iROAS = estimated incremental revenue / spend
+```
+
+Attributed ROAS answers how much credited revenue was associated with a dollar of spend. iROAS answers how much experimentally incremental revenue was estimated per dollar of spend. They can disagree.
+
+
+## Experiment Health
+
+Before a treatment-effect estimate is used for a budget decision, the project checks whether the randomized experiment is structurally trustworthy.
+
+Campaign-level diagnostics include:
+
+* randomized-arm counts versus the campaign's stored holdout fraction
+* sample-ratio mismatch (chi-square goodness-of-fit)
+* control-group advertising leakage
+* duplicate `campaign_id × member_id` assignments
+* assignment-to-outcome completeness
+* pre-treatment standardized differences for signup tenure and pre-campaign conversion
+
+Overall status is one of `PASS`, `WARN`, or `FAIL`.
+
+`FAIL` is reserved for structural problems that make causal interpretation unsafe: control exposure leakage, missing assigned members in the outcome table, duplicate randomized assignments, or severe SRM (`p < 0.001`). Mild SRM (`0.001 ≤ p < 0.05`) or a pre-treatment standardized difference above 0.10 produces `WARN` and does not automatically invalidate the experiment.
+
+Planned power and planned MDE are **not** reconstructed. The simulator never stored a pre-registered design calculation, so those metadata fields are left null. After the experiment, precision is summarized with confidence-interval width rather than post-hoc observed power.
+
+For the current seed-0 run:
+
+```text
+PASS: 22 campaigns
+WARN:  2 campaigns
+FAIL:  0 campaigns
+Control impressions on holdout members: 0
+Missing assigned outcomes: 0
+```
+
 
 ## Commercial Decision Layer
 
-Campaign-level experiment results feed a deterministic decision layer that ranks campaigns using incremental performance and assigns an efficiency category.
+There are two deterministic outputs.
 
-The current recommendation mapping is:
+### 1. Simple efficiency mapping (legacy)
+
+`data/processed/campaign_recommendations.csv` maps incrementality efficiency flags to a coarse action. It does **not** use experiment health or interval estimates.
 
 | Efficiency flag      | Recommendation    |
 | -------------------- | ----------------- |
@@ -246,18 +290,34 @@ The current recommendation mapping is:
 | `low_impact`         | `monitor`         |
 | inefficient campaign | `reduce_budget`   |
 
-For the current seed-0 simulation:
+Current seed-0 mapping: 2 increase / 10 maintain / 12 monitor / 0 reduce.
 
-| Recommendation  | Campaigns |
-| --------------- | --------: |
-| Increase budget |         2 |
-| Maintain        |        10 |
-| Monitor         |        12 |
-| Reduce budget   |         0 |
+### 2. Health-aware measurement decisions
 
-The recommendation engine is intentionally **rule based**. It is not a machine-learning model.
+`data/processed/campaign_measurement_decisions.csv` is the Stage 4 decision table. It combines attributed ROAS, incremental revenue and iROAS with uncertainty, experiment health, and efficiency flags.
 
-Its purpose is to demonstrate how experimental results can be translated into an interpretable commercial action.
+Decision order is:
+
+1. If experiment health is `FAIL`, assign `do_not_interpret`.
+2. Otherwise use the incremental-revenue 95% CI, not a p-value cutoff.
+3. If that CI is entirely positive and iROAS ≥ 1, assign `increase_budget`.
+4. If that CI is entirely positive but iROAS < 1, assign `maintain`.
+5. If that CI is entirely negative, assign `reduce_budget`.
+6. If the CI includes zero, assign `inconclusive`.
+
+A significant-looking point estimate is not enough. A wide interval that includes zero is treated as inconclusive. A failed experiment is not interpreted even if the point estimate is large and positive.
+
+Current seed-0 health-aware decisions:
+
+| Decision          | Campaigns |
+| ----------------- | --------: |
+| Increase budget   |        14 |
+| Maintain          |         3 |
+| Inconclusive      |         7 |
+| Reduce budget     |         0 |
+| Do not interpret  |         0 |
+
+Both layers are **rule based**. Neither is a trained recommendation model.
 
 
 ## Data Architecture
@@ -294,6 +354,9 @@ marts.executive_summary_metrics
 marts.experiment_lift_metrics
 marts.experiment_member_outcomes
 marts.segment_performance_metrics
+marts.experiment_design_metadata
+marts.experiment_health_metrics
+marts.campaign_measurement_decisions
 
 marts.campaign_incrementality_rankings
 marts.campaign_efficiency_flags
@@ -320,7 +383,9 @@ retail-media-platform/
 │   ├── core/
 │   │   └── database.py
 │   └── statistics/
-│       └── experiment_inference.py
+│       ├── experiment_inference.py
+│       ├── experiment_health.py
+│       └── experiment_decisions.py
 │
 ├── configs/
 │   ├── experiment_config.yaml
@@ -339,6 +404,9 @@ retail-media-platform/
 │   └── processed/
 │       ├── experiment_lift_metrics.csv
 │       ├── segment_performance_metrics.csv
+│       ├── experiment_design_metadata.csv
+│       ├── experiment_health_metrics.csv
+│       ├── campaign_measurement_decisions.csv
 │       └── campaign_recommendations.csv
 │
 ├── docs/
@@ -349,7 +417,8 @@ retail-media-platform/
 ├── notebooks/
 │   ├── 01_data_checks.ipynb
 │   ├── 03_segment_lift_analysis.ipynb
-│   └── 04_business_insights.ipynb
+│   ├── 04_business_insights.ipynb
+│   └── 05_experiment_health_decisions.ipynb
 │
 ├── scripts/
 │   ├── generate_members.py
@@ -360,6 +429,7 @@ retail-media-platform/
 │   ├── generate_transactions.py
 │   ├── load_to_postgres.py
 │   ├── run_incrementality.py
+│   ├── run_experiment_decisions.py
 │   └── generate_recommendations.py
 │
 ├── sql/
@@ -483,6 +553,8 @@ While still inside the `psql` shell, run the mart SQL files in dependency order:
 \i sql/marts/experiment_lift_metrics.sql
 \i sql/marts/experiment_member_outcomes.sql
 \i sql/marts/segment_performance_metrics.sql
+\i sql/marts/experiment_design_metadata.sql
+\i sql/marts/experiment_health_metrics.sql
 
 \i sql/marts/campaign_incrementality_rankings.sql
 \i sql/marts/campaign_efficiency_flags.sql
@@ -506,8 +578,18 @@ The incrementality marts can also be rebuilt from Python. This step attaches con
 python scripts/run_incrementality.py --export-csv
 ```
 
+Then build experiment-health diagnostics, iROAS, and the health-aware decision table:
+
+```bash
+python scripts/run_experiment_decisions.py --export-csv
+```
+
+This does not regenerate synthetic source data and does not recompute the frozen v1 treatment-effect point estimates.
+
 
 ### 6. Generate Campaign Recommendations
+
+The simple efficiency-flag mapping is unchanged:
 
 ```bash
 python scripts/generate_recommendations.py
@@ -517,6 +599,12 @@ Output:
 
 ```text
 data/processed/campaign_recommendations.csv
+```
+
+The health-aware decision table is written separately by `run_experiment_decisions.py`:
+
+```text
+data/processed/campaign_measurement_decisions.csv
 ```
 
 
@@ -529,7 +617,7 @@ python -m pytest -q
 Current result:
 
 ```text
-30 passed
+102 passed
 ```
 
 
@@ -580,7 +668,9 @@ The project tests core simulation and analytical logic, including:
 * incrementality calculations
 * conversion-lift standard errors, confidence intervals, and p-values
 * member-level bootstrap behavior for orders and revenue
-* deterministic recommendation behavior
+* sample-ratio mismatch, control leakage, and outcome-completeness diagnostics
+* iROAS transformation from incremental revenue and spend
+* health-aware deterministic decisions, including withholding interpretation after a failed experiment
 
 
 ## Current Limitations
@@ -599,6 +689,10 @@ Orders and revenue use a stratified member-level percentile bootstrap. Bias-corr
 
 All customers, advertising activity, transactions, campaign results, and revenue are simulated. Reported dollar values demonstrate the analytical workflow and are not real business outcomes.
 
+### Baseline balance is diagnostic, not a validity veto
+
+Within a campaign, eligibility is retailer plus target audience segment, so segment does not vary. Geography is sparse at the control-arm cell size. The implemented checks are standardized differences on signup tenure and pre-campaign conversion. A large standardized difference produces `WARN` only.
+
 ### No causal ML or uplift model
 
 Segment-level analysis is a descriptive subgroup analysis of the same campaign-window RCT outcomes as the primary experiment, not CATE or individualized treatment-effect modeling.
@@ -611,14 +705,17 @@ The primary causal design is randomized treatment/control assignment.
 
 The repository currently focuses on Python, PostgreSQL, experimentation, and analytical decision support rather than API or dashboard deployment.
 
+### Planned power and MDE are not reconstructed
+
+The simulator did not store a pre-registered minimum detectable effect or power calculation. Those metadata fields are null by design. Interval width is used as the post-experiment precision summary.
+
 
 ## Next Improvements
 
 The highest-value next additions are:
 
 1. Add a single reproducible command for rebuilding staging tables, marts, and analytical outputs.
-2. Build a concise attribution-vs-incrementality comparison view for campaign decision making.
-3. Add a lightweight dashboard only after the statistical layer is complete.
+2. Add a lightweight dashboard only after the measurement and decision layer is complete.
 
 
 ## Why This Project Matters
@@ -629,4 +726,4 @@ A campaign can receive credit for customer purchases without causing those purch
 
 > **What would these customers have done without the advertising?**
 
-This project demonstrates how randomized holdouts, SQL-based analytical pipelines, and treatment-effect estimation can turn that question into measurable campaign outcomes and interpretable business decisions.
+This project demonstrates how randomized holdouts, SQL-based analytical pipelines, treatment-effect estimation, experiment-integrity checks, and deterministic decision rules can turn that question into measurable campaign outcomes and interpretable business decisions.

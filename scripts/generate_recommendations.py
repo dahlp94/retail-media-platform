@@ -1,5 +1,9 @@
 """
-Generate campaign budget recommendations from decision-layer marts.
+Generate the simple efficiency-flag recommendation CSV.
+
+This is the legacy mapping from incrementality efficiency flags to a coarse
+action. It does not use experiment health or interval estimates. The
+health-aware table is built by scripts/run_experiment_decisions.py.
 """
 
 from __future__ import annotations
