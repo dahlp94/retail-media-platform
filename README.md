@@ -601,7 +601,7 @@ All customers, advertising activity, transactions, campaign results, and revenue
 
 ### No causal ML or uplift model
 
-Segment-level analysis is descriptive subgroup analysis rather than CATE or individualized treatment-effect modeling.
+Segment-level analysis is a descriptive subgroup analysis of the same campaign-window RCT outcomes as the primary experiment, not CATE or individualized treatment-effect modeling.
 
 ### No observational causal inference
 
@@ -616,10 +616,9 @@ The repository currently focuses on Python, PostgreSQL, experimentation, and ana
 
 The highest-value next additions are:
 
-1. Align segment-level outcome definitions with the primary campaign experiment.
-2. Add a single reproducible command for rebuilding staging tables, marts, and analytical outputs.
-3. Build a concise attribution-vs-incrementality comparison view for campaign decision making.
-4. Add a lightweight dashboard only after the statistical layer is complete.
+1. Add a single reproducible command for rebuilding staging tables, marts, and analytical outputs.
+2. Build a concise attribution-vs-incrementality comparison view for campaign decision making.
+3. Add a lightweight dashboard only after the statistical layer is complete.
 
 
 ## Why This Project Matters

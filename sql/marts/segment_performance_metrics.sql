@@ -1,5 +1,7 @@
--- Campaign-level subgroup metrics by audience segment and geography.
--- Outcomes include campaign-attributed purchases during the campaign window.
+-- Subgroup treatment-control metrics by audience segment and geography.
+-- Outcomes match marts.experiment_lift_metrics: all member purchases during
+-- the campaign window, independent of source_campaign_id.
+-- Grain: one row per (campaign_id, audience_segment_id, primary_geo_id).
 
 CREATE SCHEMA IF NOT EXISTS marts;
 
@@ -7,42 +9,46 @@ DROP TABLE IF EXISTS marts.segment_performance_metrics;
 
 CREATE TABLE marts.segment_performance_metrics AS
 
-WITH attributed_outcomes AS (
+WITH experiment_population AS (
     SELECT
-        t.member_id,
-        t.source_campaign_id AS campaign_id,
-        COUNT(*)::bigint AS order_count,
-        SUM(t.order_value_usd)::numeric(18, 2) AS revenue_usd
-    FROM staging.stg_transactions AS t
+        a.campaign_id,
+        a.member_id,
+        a.experiment_arm,
+        m.audience_segment_id,
+        m.primary_geo_id,
+        c.start_date,
+        c.end_date
+    FROM staging.stg_experiment_assignment AS a
     INNER JOIN staging.stg_campaigns AS c
-        ON c.campaign_id = t.source_campaign_id
-    WHERE t.source_campaign_id IS NOT NULL
-      AND t.order_timestamp::date BETWEEN c.start_date AND c.end_date
-    GROUP BY
-        t.member_id,
-        t.source_campaign_id
+        ON c.campaign_id = a.campaign_id
+    LEFT JOIN staging.stg_members AS m
+        ON m.member_id = a.member_id
+    WHERE a.experiment_arm IN ('treatment', 'control')
 ),
 
 member_outcomes AS (
     SELECT
-        a.campaign_id,
-        m.audience_segment_id,
-        m.primary_geo_id,
-        a.member_id,
-        a.experiment_arm,
-        COALESCE(o.order_count, 0)::bigint AS order_count,
-        COALESCE(o.revenue_usd, 0)::numeric(18, 2) AS revenue_usd,
+        ep.campaign_id,
+        ep.audience_segment_id,
+        ep.primary_geo_id,
+        ep.member_id,
+        ep.experiment_arm,
+        COUNT(t.transaction_id)::bigint AS order_count,
+        COALESCE(SUM(t.order_value_usd), 0)::numeric(18, 2) AS revenue_usd,
         CASE
-            WHEN COALESCE(o.order_count, 0) > 0 THEN 1
+            WHEN COUNT(t.transaction_id) > 0 THEN 1
             ELSE 0
         END::smallint AS is_converter
-    FROM staging.stg_experiment_assignment AS a
-    LEFT JOIN staging.stg_members AS m
-        ON m.member_id = a.member_id
-    LEFT JOIN attributed_outcomes AS o
-        ON o.member_id = a.member_id
-        AND o.campaign_id = a.campaign_id
-    WHERE a.experiment_arm IN ('treatment', 'control')
+    FROM experiment_population AS ep
+    LEFT JOIN staging.stg_transactions AS t
+        ON t.member_id = ep.member_id
+        AND t.order_timestamp::date BETWEEN ep.start_date AND ep.end_date
+    GROUP BY
+        ep.campaign_id,
+        ep.audience_segment_id,
+        ep.primary_geo_id,
+        ep.member_id,
+        ep.experiment_arm
 ),
 
 arm_metrics AS (
@@ -138,6 +144,12 @@ SELECT
     primary_geo_id,
     treatment_member_count,
     control_member_count,
+    treatment_converters,
+    control_converters,
+    treatment_orders,
+    control_orders,
+    treatment_revenue,
+    control_revenue,
     treatment_conversion_rate,
     control_conversion_rate,
 
