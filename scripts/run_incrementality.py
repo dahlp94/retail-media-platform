@@ -1,9 +1,9 @@
 """
-Build incrementality marts in PostgreSQL and optionally export them to CSV.
+Attach campaign-level uncertainty to dbt-built incrementality marts.
 
-After the SQL point-estimate marts are built, campaign-level conversion
-inference and member-level bootstrap intervals are attached to
-``marts.experiment_lift_metrics``.
+Point-estimate tables are built by ``dbt run``. This script does not
+regenerate synthetic data and does not recompute ITT point estimates.
+Use ``--legacy-sql`` only to execute the frozen files under sql/marts/.
 """
 
 from __future__ import annotations
@@ -73,8 +73,8 @@ def load_inference_settings(
     }
 
 
-def run_marts() -> None:
-    """Build incrementality marts from their SQL files."""
+def run_legacy_sql_marts() -> None:
+    """Rebuild incrementality marts from frozen sql/marts/ files."""
     with get_raw_connection() as conn:
         with conn.cursor() as cur:
             for mart in SQL_MARTS:
@@ -168,6 +168,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Export refreshed marts to data/processed.",
     )
+    parser.add_argument(
+        "--legacy-sql",
+        action="store_true",
+        help="Rebuild marts from frozen sql/marts/*.sql instead of using dbt output.",
+    )
     return parser.parse_args()
 
 
@@ -180,7 +185,14 @@ def main() -> None:
     )
 
     settings = load_inference_settings()
-    run_marts()
+    if args.legacy_sql:
+        logger.warning("Using frozen sql/marts/ files; prefer `scripts/run_dbt.sh run`.")
+        run_legacy_sql_marts()
+    else:
+        logger.info(
+            "Expecting dbt-built marts.experiment_lift_metrics and "
+            "marts.experiment_member_outcomes"
+        )
     enrich_experiment_lift_mart(settings)
 
     if args.export_csv:

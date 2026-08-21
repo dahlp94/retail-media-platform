@@ -1,11 +1,12 @@
 """
 Build experiment-health diagnostics and campaign measurement decisions.
 
-Requires incrementality marts (including enriched experiment_lift_metrics)
-and campaign spend / efficiency marts to already exist.
+Requires dbt-built incrementality, spend, and efficiency marts. Run
+``scripts/run_dbt.sh run`` and ``scripts/run_incrementality.py`` first.
 
 Does not regenerate synthetic source data and does not recompute
-treatment-effect point estimates.
+treatment-effect point estimates. Use ``--legacy-sql`` only to execute
+the frozen files under sql/marts/.
 """
 
 from __future__ import annotations
@@ -73,7 +74,7 @@ def load_decision_settings(
     }
 
 
-def run_sql_marts() -> None:
+def run_legacy_sql_marts() -> None:
     with get_raw_connection() as conn:
         with conn.cursor() as cur:
             for mart in SQL_MARTS:
@@ -163,6 +164,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Export health, design metadata, and decisions to data/processed.",
     )
+    parser.add_argument(
+        "--legacy-sql",
+        action="store_true",
+        help="Rebuild design/health SQL from frozen sql/marts/*.sql instead of using dbt output.",
+    )
     return parser.parse_args()
 
 
@@ -170,7 +176,14 @@ def main() -> None:
     args = parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     settings = load_decision_settings()
-    run_sql_marts()
+    if args.legacy_sql:
+        logger.warning("Using frozen sql/marts/ files; prefer `scripts/run_dbt.sh run`.")
+        run_legacy_sql_marts()
+    else:
+        logger.info(
+            "Expecting dbt-built marts.experiment_health_metrics and "
+            "marts.experiment_design_metadata"
+        )
     enrich_health_mart(settings)
     build_decision_mart(settings)
     if args.export_csv:
