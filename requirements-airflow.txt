@@ -1,0 +1,12 @@
+# Optional Stage 6 extra. Install AFTER requirements.txt.
+# Airflow 2.x requires SQLAlchemy <2.0 and would break pandas/dbt here.
+# Airflow 3.1.x allows SQLAlchemy 2.
+#
+#   pip install -r requirements.txt
+#   pip install -r requirements-airflow.txt
+#
+# If libcst tries to compile from source on macOS, install a wheel first:
+#   pip install 'libcst>=1.8.2' --only-binary=:all:
+apache-airflow>=3.1.0,<3.2.0
+apache-airflow-providers-standard>=1.0.0,<2.0.0
+libcst>=1.8.2
