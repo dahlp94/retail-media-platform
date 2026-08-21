@@ -37,31 +37,26 @@ Randomized treatment / control assignment
 Simulated advertising and transactions
                 |
                 v
-PostgreSQL raw data
+PostgreSQL raw.*
                 |
                 v
-Typed staging tables
+dbt staging / intermediate / marts
                 |
                 v
-Campaign KPI and experiment marts
+Treatment-control lift point estimates
                 |
                 v
-Treatment-control lift estimates + uncertainty
-                |
-                v
-Experiment-health diagnostics
-                |
-                v
-Attribution vs incrementality decision table
+Python uncertainty + experiment health + decisions
 ```
 
 The system combines:
 
-* **Python** for reproducible synthetic data generation, experimental assignment, database loading, and recommendations
-* **PostgreSQL / SQL** for data transformation, campaign KPIs, experimental outcome construction, and analytical marts
+* **Python** for reproducible synthetic data generation, experimental assignment, database loading, statistical inference, and recommendations
+* **PostgreSQL** as the analytical warehouse
+* **dbt** for governed staging/intermediate/mart transformations, grain documentation, lineage, and data tests
 * **Randomized A/B testing** for treatment-control incrementality measurement
 * **Commercial analytics** for connecting campaign performance to budget recommendations
-* **pytest** for validating data generation, experiment assignment, and analytical logic
+* **pytest** for validating data generation, experiment assignment, inference, and dbt parity
 
 
 ## Experiment Design
@@ -322,57 +317,86 @@ Both layers are **rule based**. Neither is a trained recommendation model.
 
 ## Data Architecture
 
-PostgreSQL is organized into three analytical layers.
+PostgreSQL remains the warehouse. **dbt** is the canonical transformation layer for the measurement path used by incrementality, ROAS/iROAS, and campaign decisions.
 
-### Raw
+### Trusted Analytics Layer
 
-Synthetic CSV files are loaded into `raw.*` tables with minimal transformation.
+dbt was introduced so experiment, attribution, and campaign-measurement inputs can be rebuilt from documented, tested models rather than a loose collection of SQL scripts.
 
-### Staging
+This remains a **synthetic portfolio system**, not a production warehouse or cloud data platform.
 
-SQL converts raw values into typed analytical tables:
+dbt owns:
+
+* source declarations over `raw.*`
+* staging type cleanup
+* intermediate assigned populations
+* incrementality and attribution marts
+* model grains, documentation, and lineage
+* generic and experiment-integrity tests
+
+Python still owns:
+
+* Wald conversion inference
+* member-level bootstrap intervals
+* SRM p-values and baseline SMDs
+* iROAS (incremental revenue / spend)
+* PASS/WARN/FAIL health status
+* deterministic campaign decisions
+
+Frozen v1 estimands and Stage 4 decision rules were not rewritten in SQL. Parity tests compare dbt marts to the existing pandas ITT reference.
+
+### Lineage
+
+**Incrementality** (randomized assignment + campaign-window purchases; ignores `source_campaign_id`):
 
 ```text
-staging.stg_members
-staging.stg_campaigns
+raw.campaign_experiment_assignments
+        ↓
 staging.stg_experiment_assignment
-staging.stg_ad_events
-staging.stg_transactions
+        ↓
+intermediate.int_experiment_assigned_population
+        ↓
+marts.experiment_member_outcomes
+        ↓
+marts.experiment_lift_metrics          (point estimates)
+marts.segment_performance_metrics
+marts.experiment_health_metrics        (integrity inputs)
+        ↓
+Python inference, health status, iROAS, decisions
 ```
 
-### Marts
-
-Business and experimentation logic is implemented in analytical marts including:
+**Attribution** (credit via `source_campaign_id`):
 
 ```text
+staging.stg_ad_events
+staging.stg_transactions.source_campaign_id
+        ↓
 marts.campaign_base_metrics
-marts.campaign_funnel_metrics
-marts.campaign_spend_metrics
-marts.daily_campaign_trends
-marts.executive_summary_metrics
-
-marts.experiment_lift_metrics
-marts.experiment_member_outcomes
-marts.segment_performance_metrics
-marts.experiment_design_metadata
-marts.experiment_health_metrics
-marts.campaign_measurement_decisions
-
-marts.campaign_incrementality_rankings
-marts.campaign_efficiency_flags
+        ↓
+marts.campaign_spend_metrics           (attributed ROAS)
 ```
 
-The SQL layer demonstrates analytical patterns including:
+These branches remain separate. Attributed ROAS is not iROAS.
 
-* CTEs
-* joins across campaign, customer, exposure, and transaction tables
-* conditional aggregation
-* `COUNT(*) FILTER`
-* NULL-safe ratios
-* funnel calculations
-* treatment-control aggregation
-* window functions and `RANK()`
-* campaign-level KPI rollups
+### Warehouse schemas
+
+```text
+raw            untyped CSV loads
+staging        typed dbt staging models
+intermediate   assigned campaign-member population
+marts          business marts, including Python-enriched tables
+```
+
+Files under `sql/staging/` and `sql/marts/` are **frozen legacy references**. They are not the default rebuild path. Reporting marts not migrated in Stage 5 still live only as legacy SQL:
+
+```text
+sql/marts/campaign_funnel_metrics.sql
+sql/marts/daily_campaign_trends.sql
+sql/marts/executive_summary_metrics.sql
+sql/marts/campaign_incrementality_rankings.sql
+```
+
+`marts.campaign_measurement_decisions` is created by Python, not by dbt.
 
 
 ## Repository Structure
@@ -409,6 +433,13 @@ retail-media-platform/
 │       ├── campaign_measurement_decisions.csv
 │       └── campaign_recommendations.csv
 │
+├── dbt/
+│   ├── dbt_project.yml
+│   ├── profiles.yml
+│   ├── models/
+│   ├── macros/
+│   └── tests/
+│
 ├── docs/
 │   ├── attribution_methodology.md
 │   ├── experiment_design.md
@@ -428,9 +459,12 @@ retail-media-platform/
 │   ├── generate_ad_events.py
 │   ├── generate_transactions.py
 │   ├── load_to_postgres.py
+│   ├── run_dbt.sh
+│   ├── run_analytics.sh
 │   ├── run_incrementality.py
 │   ├── run_experiment_decisions.py
-│   └── generate_recommendations.py
+│   ├── generate_recommendations.py
+│   └── validate_dbt_parity.py
 │
 ├── sql/
 │   ├── staging/
@@ -457,10 +491,12 @@ retail-media-platform/
 
 * PostgreSQL
 * SQL
+* dbt (dbt-postgres)
 
 ### Testing
 
 * pytest
+* dbt tests
 
 ### Analysis
 
@@ -518,73 +554,46 @@ python scripts/load_to_postgres.py
 This loads the generated CSV files into the PostgreSQL `raw` schema.
 
 
-### 4. Build Staging Tables
+### 4. Build the trusted analytics layer (dbt)
 
-Connect to PostgreSQL:
+dbt reads `POSTGRES_*` from `.env`. The wrapper loads that file:
 
 ```bash
-psql "$DATABASE_URL"
+scripts/run_dbt.sh debug
+scripts/run_dbt.sh run
+scripts/run_dbt.sh test
 ```
 
-Then, from inside the `psql` shell, run the staging SQL files in dependency order:
+This builds typed staging tables, the assigned-population intermediate model, incrementality marts, and the attribution spend/ROAS marts used by iROAS.
 
-```sql
-\i sql/staging/stg_members.sql
-\i sql/staging/stg_campaigns.sql
-\i sql/staging/stg_experiment_assignment.sql
-\i sql/staging/stg_ad_events.sql
-\i sql/staging/stg_transactions.sql
+Lineage and model docs:
+
+```bash
+scripts/run_dbt.sh docs generate
+scripts/run_dbt.sh docs serve
 ```
 
-These transformations convert the raw CSV-loaded tables into typed analytical tables under the `staging` schema.
+Do not commit generated `dbt/target/` artifacts.
 
+Optional convenience command (dbt run + dbt test + Python enrichment + pytest):
 
-### 5. Build Analytical Marts
-
-While still inside the `psql` shell, run the mart SQL files in dependency order:
-
-```sql
-\i sql/marts/campaign_base_metrics.sql
-\i sql/marts/campaign_funnel_metrics.sql
-\i sql/marts/campaign_spend_metrics.sql
-\i sql/marts/daily_campaign_trends.sql
-\i sql/marts/executive_summary_metrics.sql
-
-\i sql/marts/experiment_lift_metrics.sql
-\i sql/marts/experiment_member_outcomes.sql
-\i sql/marts/segment_performance_metrics.sql
-\i sql/marts/experiment_design_metadata.sql
-\i sql/marts/experiment_health_metrics.sql
-
-\i sql/marts/campaign_incrementality_rankings.sql
-\i sql/marts/campaign_efficiency_flags.sql
+```bash
+scripts/run_analytics.sh
 ```
 
-The first set builds standard campaign-performance metrics such as impressions, clicks, spend, CTR, and ROAS.
 
-The experiment marts construct treatment and control outcomes and calculate campaign-level lift, incremental orders, and incremental revenue.
+### 5. Attach statistical uncertainty and decisions
 
-The final marts rank campaigns and assign efficiency categories used by the recommendation layer.
-
-To leave PostgreSQL when finished:
-
-```sql
-\q
-```
-
-The incrementality marts can also be rebuilt from Python. This step attaches conversion-lift standard errors and member-level bootstrap intervals to `marts.experiment_lift_metrics`, then optionally exports CSV:
+dbt produces point estimates and health *inputs*. Python adds intervals, SRM/SMD status, iROAS, and decisions. Re-running dbt drops those enrichment columns, so Python must run after dbt:
 
 ```bash
 python scripts/run_incrementality.py --export-csv
-```
-
-Then build experiment-health diagnostics, iROAS, and the health-aware decision table:
-
-```bash
 python scripts/run_experiment_decisions.py --export-csv
 ```
 
 This does not regenerate synthetic source data and does not recompute the frozen v1 treatment-effect point estimates.
+
+`--legacy-sql` on those scripts executes the frozen files under `sql/` instead of using dbt output. Prefer `dbt run`.
 
 
 ### 6. Generate Campaign Recommendations
@@ -614,10 +623,11 @@ data/processed/campaign_measurement_decisions.csv
 python -m pytest -q
 ```
 
-Current result:
+Current result after Stage 5:
 
 ```text
-102 passed
+python -m pytest -q   → 112 passed
+dbt test              → 104 passed
 ```
 
 
@@ -671,6 +681,8 @@ The project tests core simulation and analytical logic, including:
 * sample-ratio mismatch, control leakage, and outcome-completeness diagnostics
 * iROAS transformation from incremental revenue and spend
 * health-aware deterministic decisions, including withholding interpretation after a failed experiment
+* dbt mart parity against the frozen pandas ITT reference
+* warehouse tests for control-exposure isolation, assignment uniqueness, outcome completeness, and subgroup reconciliation
 
 
 ## Current Limitations
@@ -714,8 +726,8 @@ The simulator did not store a pre-registered minimum detectable effect or power 
 
 The highest-value next additions are:
 
-1. Add a single reproducible command for rebuilding staging tables, marts, and analytical outputs.
-2. Add a lightweight dashboard only after the measurement and decision layer is complete.
+1. Add a lightweight dashboard only after the measurement and decision layer is complete.
+2. Optionally migrate remaining reporting marts (`campaign_funnel_metrics`, `daily_campaign_trends`, `executive_summary_metrics`, `campaign_incrementality_rankings`) into dbt.
 
 
 ## Why This Project Matters
@@ -726,4 +738,4 @@ A campaign can receive credit for customer purchases without causing those purch
 
 > **What would these customers have done without the advertising?**
 
-This project demonstrates how randomized holdouts, SQL-based analytical pipelines, treatment-effect estimation, experiment-integrity checks, and deterministic decision rules can turn that question into measurable campaign outcomes and interpretable business decisions.
+This project demonstrates how randomized holdouts, governed SQL transformations, treatment-effect estimation, experiment-integrity checks, and deterministic decision rules can turn that question into measurable campaign outcomes and interpretable business decisions.

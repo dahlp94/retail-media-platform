@@ -101,6 +101,15 @@ logs/
 *.log
 
 ############################
+# dbt
+############################
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/package-lock.yml
+dbt/.user.yml
+
+############################
 # Misc
 ############################
 *.tmp
