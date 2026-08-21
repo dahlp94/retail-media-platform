@@ -1,0 +1,78 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Untyped synthetic CSVs loaded by scripts/load_to_postgres.py.
+      Every column is TEXT. Typing and renaming happen in staging models.
+      This is simulator output, not production advertiser data.
+    schema: raw
+    tables:
+      - name: members
+        description: Synthetic shopper dimension. Grain is one row per member_id.
+        columns:
+          - name: member_id
+            description: Primary shopper identifier.
+          - name: retailer_id
+          - name: audience_segment_id
+          - name: primary_geo_id
+          - name: signup_date
+          - name: outcome_currency
+
+      - name: advertisers
+        description: >
+          Synthetic advertiser dimension. Loaded to raw but not required
+          for the Stage 5 incrementality or attribution path.
+        columns:
+          - name: advertiser_id
+
+      - name: campaigns
+        description: Synthetic campaign metadata including dates and targeting.
+        columns:
+          - name: campaign_id
+          - name: campaign_name
+          - name: advertiser_id
+          - name: retailer_id
+          - name: start_date
+          - name: end_date
+          - name: target_audience_segment_id
+          - name: target_geo_id
+
+      - name: campaign_experiment_assignments
+        description: >
+          Frozen v1 randomized assignment. Grain is one row per
+          campaign_id × member_id with experiment_arm treatment or control.
+        columns:
+          - name: campaign_id
+          - name: member_id
+          - name: experiment_arm
+          - name: assignment_unit
+          - name: assignment_method
+          - name: holdout_fraction
+            description: Campaign-specific intended control share used by SRM.
+
+      - name: ad_events
+        description: >
+          Impression and click events. Control members should have none.
+          The raw timestamp column is named "timestamp".
+        columns:
+          - name: event_id
+          - name: member_id
+          - name: campaign_id
+          - name: timestamp
+          - name: event_type
+          - name: cost
+
+      - name: transactions
+        description: >
+          Purchases. source_campaign_id is an attribution label only.
+          Randomized incrementality ignores it and uses campaign-window
+          membership instead.
+        columns:
+          - name: transaction_id
+          - name: member_id
+          - name: order_timestamp
+          - name: order_value_usd
+          - name: purchase_driver
+          - name: source_campaign_id
+            description: Attribution credit label. Not a causal outcome key.

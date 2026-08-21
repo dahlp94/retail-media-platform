@@ -1,3 +1,5 @@
+-- FROZEN LEGACY REFERENCE (Stage 5).
+-- Canonical build: dbt/models/staging/stg_transactions.sql
 -- Staging: purchase / order outcomes
 
 CREATE SCHEMA IF NOT EXISTS staging;

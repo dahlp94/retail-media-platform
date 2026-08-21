@@ -1,3 +1,5 @@
+-- FROZEN LEGACY REFERENCE (Stage 5).
+-- Canonical build: dbt/models/marts/incrementality/experiment_design_metadata.sql
 -- One experiment per campaign. Dates come from campaigns.
 -- planned_power and planned_mde are NULL: the simulator never stored a
 -- pre-registered MDE or power calculation. Do not invent those values.

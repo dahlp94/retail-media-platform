@@ -1,3 +1,5 @@
+-- FROZEN LEGACY REFERENCE (Stage 5).
+-- Canonical build: dbt/models/marts/commercial/campaign_efficiency_flags.sql
 -- Campaign efficiency tiers based on conversion lift and incremental revenue.
 
 CREATE SCHEMA IF NOT EXISTS marts;

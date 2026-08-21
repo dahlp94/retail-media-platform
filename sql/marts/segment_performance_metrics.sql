@@ -1,3 +1,5 @@
+-- FROZEN LEGACY REFERENCE (Stage 5).
+-- Canonical build: dbt/models/marts/incrementality/segment_performance_metrics.sql
 -- Subgroup treatment-control metrics by audience segment and geography.
 -- Outcomes match marts.experiment_lift_metrics: all member purchases during
 -- the campaign window, independent of source_campaign_id.

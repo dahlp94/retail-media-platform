@@ -1,3 +1,5 @@
+-- FROZEN LEGACY REFERENCE (Stage 5).
+-- Canonical build: dbt/models/marts/attribution/campaign_base_metrics.sql
 -- Campaign performance summary by campaign_id
 
 CREATE SCHEMA IF NOT EXISTS marts;

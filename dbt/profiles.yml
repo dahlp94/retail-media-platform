@@ -1,0 +1,22 @@
+# Environment-driven profile. No credentials are stored here.
+# Source the repository .env (POSTGRES_*) before running dbt, or use
+# scripts/run_dbt.sh which loads .env automatically.
+#
+#   source .env
+#   dbt debug --project-dir dbt --profiles-dir dbt
+
+retail_media:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'localhost') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5432') | as_number }}"
+      user: "{{ env_var('POSTGRES_USER', 'retail_media') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD') }}"
+      dbname: "{{ env_var('POSTGRES_DB', 'retail_media') }}"
+      schema: dbt_dev
+      threads: 4
+      keepalives_idle: 0
+      connect_timeout: 10
+      sslmode: "{{ env_var('POSTGRES_SSLMODE', 'prefer') }}"

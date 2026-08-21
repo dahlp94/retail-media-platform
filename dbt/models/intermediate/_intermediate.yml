@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: int_experiment_assigned_population
+    description: >
+      Intermediate incrementality population. Joins randomized assignment
+      to campaign windows. No purchases yet, so non-purchasers remain
+      in the downstream denominator.
+      Grain: one row per campaign × assigned member.
+    columns:
+      - name: campaign_id
+        tests:
+          - not_null
+      - name: member_id
+        tests:
+          - not_null
+      - name: experiment_arm
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['treatment', 'control']
+      - name: start_date
+        tests:
+          - not_null
+      - name: end_date
+        tests:
+          - not_null
+    tests:
+      - unique_combination:
+          columns: [campaign_id, member_id]

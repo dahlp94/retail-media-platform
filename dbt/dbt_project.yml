@@ -1,0 +1,43 @@
+name: retail_media
+version: "1.0.0"
+config-version: 2
+profile: retail_media
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+docs-paths: ["docs"]
+
+target-path: target
+clean-targets:
+  - target
+  - dbt_packages
+  - logs
+
+require-dbt-version: [">=1.8.0", "<1.10.0"]
+
+models:
+  retail_media:
+    +materialized: table
+    staging:
+      +schema: staging
+      +docs:
+        node_color: "#8ab4f8"
+    intermediate:
+      +schema: intermediate
+      +docs:
+        node_color: "#f6c26b"
+    marts:
+      +schema: marts
+      incrementality:
+        +docs:
+          node_color: "#81c995"
+      attribution:
+        +docs:
+          node_color: "#f28b82"
+      commercial:
+        +docs:
+          node_color: "#c58af9"

@@ -1,0 +1,53 @@
+version: 2
+
+models:
+  - name: campaign_base_metrics
+    description: >
+      Attribution branch. Grain is one row per campaign.
+      Impressions, clicks, and spend come from ad events.
+      Orders and revenue come from transactions credited via
+      source_campaign_id. This is not a causal incrementality table.
+    columns:
+      - name: campaign_id
+        tests:
+          - not_null
+          - unique
+      - name: impressions
+        tests:
+          - not_null
+          - non_negative
+      - name: clicks
+        tests:
+          - not_null
+          - non_negative
+      - name: spend_usd
+        tests:
+          - not_null
+          - non_negative
+      - name: orders
+        tests:
+          - not_null
+          - non_negative
+      - name: revenue_usd
+        tests:
+          - not_null
+          - non_negative
+
+  - name: campaign_spend_metrics
+    description: >
+      Attributed efficiency metrics, including ROAS =
+      attributed revenue / spend. Distinct from iROAS, which uses
+      estimated incremental revenue and is computed in Python.
+
+      Grain: one row per campaign.
+    columns:
+      - name: campaign_id
+        tests:
+          - not_null
+          - unique
+      - name: spend_usd
+        tests:
+          - not_null
+          - non_negative
+      - name: roas
+        description: Attributed ROAS. Null when spend is zero.

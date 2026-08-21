@@ -1,3 +1,5 @@
+-- FROZEN LEGACY REFERENCE (Stage 5).
+-- Canonical build: dbt/models/staging/stg_experiment_assignment.sql
 -- Staging: campaign-level experiment / treatment assignment (user-level arms)
 
 CREATE SCHEMA IF NOT EXISTS staging;

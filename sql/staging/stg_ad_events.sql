@@ -1,3 +1,5 @@
+-- FROZEN LEGACY REFERENCE (Stage 5).
+-- Canonical build: dbt/models/staging/stg_ad_events.sql
 -- Staging: ad delivery / exposure events
 
 CREATE SCHEMA IF NOT EXISTS staging;

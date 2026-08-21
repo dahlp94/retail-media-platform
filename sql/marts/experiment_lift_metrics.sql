@@ -1,3 +1,5 @@
+-- FROZEN LEGACY REFERENCE (Stage 5).
+-- Canonical build: dbt/models/marts/incrementality/experiment_lift_metrics.sql
 -- Campaign-level treatment/control incrementality metrics.
 -- Outcomes include all member purchases during the campaign window.
 -- Point estimates only. Uncertainty columns are added by

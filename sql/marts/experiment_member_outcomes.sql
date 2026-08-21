@@ -1,3 +1,5 @@
+-- FROZEN LEGACY REFERENCE (Stage 5).
+-- Canonical build: dbt/models/marts/incrementality/experiment_member_outcomes.sql
 -- Creates member-level outcomes for treatment and control groups.
 -- Includes all purchases made during the campaign window.
 

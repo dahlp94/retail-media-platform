@@ -1,3 +1,5 @@
+-- FROZEN LEGACY REFERENCE (Stage 5).
+-- Canonical build: dbt/models/marts/attribution/campaign_spend_metrics.sql
 -- Campaign-level spend and revenue efficiency metrics
 
 CREATE SCHEMA IF NOT EXISTS marts;

@@ -1,3 +1,5 @@
+-- FROZEN LEGACY REFERENCE (Stage 5).
+-- Canonical build: dbt/models/marts/incrementality/experiment_health_metrics.sql
 -- Campaign-level experiment-integrity diagnostics.
 -- Counts and leakage only. SRM p-values, standardized differences, and
 -- overall health status are attached by scripts/run_experiment_decisions.py.

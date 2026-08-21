@@ -1,3 +1,5 @@
+-- FROZEN LEGACY REFERENCE (Stage 5).
+-- Canonical build: dbt/models/staging/stg_campaigns.sql
 -- Source: raw.campaigns (all columns TEXT from CSV load)
 
 CREATE SCHEMA IF NOT EXISTS staging;

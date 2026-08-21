@@ -1,0 +1,22 @@
+version: 2
+
+models:
+  - name: campaign_efficiency_flags
+    description: >
+      Legacy point-estimate efficiency flags from conversion lift and
+      incremental revenue thresholds. Used by
+      scripts/generate_recommendations.py.
+
+      This is not the Stage 4 health-aware decision table
+      (marts.campaign_measurement_decisions), which is built in Python.
+
+      Grain: one row per campaign.
+    columns:
+      - name: campaign_id
+        tests:
+          - not_null
+          - unique
+      - name: efficiency_flag
+        tests:
+          - accepted_values:
+              values: ['high_impact', 'moderate', 'low_impact', 'inefficient']

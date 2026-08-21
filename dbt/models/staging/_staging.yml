@@ -1,0 +1,123 @@
+version: 2
+
+models:
+  - name: stg_members
+    description: >
+      Typed shopper dimension. Grain is one row per member_id.
+      Cleanup only: casts, trim. No measurement logic.
+    columns:
+      - name: member_id
+        description: Shopper identifier.
+        tests:
+          - not_null
+          - unique
+      - name: retailer_id
+        tests:
+          - not_null
+      - name: audience_segment_id
+        tests:
+          - not_null
+      - name: primary_geo_id
+        tests:
+          - not_null
+      - name: signup_date
+        tests:
+          - not_null
+
+  - name: stg_campaigns
+    description: >
+      Typed campaign dimension. Grain is one row per campaign_id.
+      Analysis windows are campaign start_date/end_date, not unused YAML
+      window knobs in configs/experiment_config.yaml.
+    columns:
+      - name: campaign_id
+        tests:
+          - not_null
+          - unique
+      - name: start_date
+        tests:
+          - not_null
+      - name: end_date
+        tests:
+          - not_null
+    tests:
+      - valid_date_window:
+          start_column: start_date
+          end_column: end_date
+
+  - name: stg_experiment_assignment
+    description: >
+      Frozen v1 randomized assignment. Incrementality branch starts here.
+      Grain is one row per campaign_id × member_id.
+    columns:
+      - name: campaign_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_campaigns')
+              field: campaign_id
+      - name: member_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_members')
+              field: member_id
+      - name: experiment_arm
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['treatment', 'control']
+      - name: holdout_fraction
+        description: Campaign-specific intended control share for SRM.
+        tests:
+          - not_null
+          - between_zero_and_one
+    tests:
+      - unique_combination:
+          columns: [campaign_id, member_id]
+
+  - name: stg_ad_events
+    description: >
+      Typed impression and click events. Used for delivery, spend, and
+      control-exposure isolation tests. Not used to define RCT outcomes.
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - unique
+      - name: campaign_id
+        tests:
+          - not_null
+      - name: member_id
+        tests:
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              values: ['impression', 'click']
+      - name: cost
+        tests:
+          - non_negative
+
+  - name: stg_transactions
+    description: >
+      Typed purchases. source_campaign_id is attribution credit only.
+      Incrementality models join this table on member_id and campaign
+      dates, never on source_campaign_id.
+    columns:
+      - name: transaction_id
+        tests:
+          - not_null
+          - unique
+      - name: member_id
+        tests:
+          - not_null
+      - name: order_timestamp
+        tests:
+          - not_null
+      - name: order_value_usd
+        tests:
+          - not_null
+          - non_negative
+      - name: source_campaign_id
+        description: Attribution label. Null means unattributed baseline demand.

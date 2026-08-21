@@ -1,3 +1,5 @@
+-- FROZEN LEGACY REFERENCE (Stage 5).
+-- Canonical build: dbt/models/staging/stg_members.sql
 -- Staging: members (shopper / analysis unit dimension)
 
 CREATE SCHEMA IF NOT EXISTS staging;
