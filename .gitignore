@@ -110,6 +110,15 @@ dbt/package-lock.yml
 dbt/.user.yml
 
 ############################
+# Airflow (local metadata only)
+############################
+.airflow/
+airflow.db
+airflow-webserver.pid
+airflow.cfg
+webserver_config.py
+
+############################
 # Misc
 ############################
 *.tmp

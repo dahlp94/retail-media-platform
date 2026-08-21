@@ -130,3 +130,5 @@ Re-running `dbt run` rebuilds SQL tables and **drops** those Python enrichment c
 The files under `sql/staging/` and `sql/marts/` are frozen references for the pre-dbt implementation. They are not the default build path.
 
 `--legacy-sql` on the Python scripts can still execute those files in an emergency. Prefer `dbt run`.
+
+The Airflow DAG (`retail_media_measurement_pipeline`) calls `scripts/run_dbt.sh run` then `scripts/run_dbt.sh test`. It does not reimplement these models.

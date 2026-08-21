@@ -47,6 +47,12 @@ Treatment-control lift point estimates
                 |
                 v
 Python uncertainty + experiment health + decisions
+                |
+                v
+Processed CSVs
+
+Airflow orchestrates the warehouse rebuild and Python enrichment.
+It does not compute lift, health, iROAS, or decisions.
 ```
 
 The system combines:
@@ -56,7 +62,8 @@ The system combines:
 * **dbt** for governed staging/intermediate/mart transformations, grain documentation, lineage, and data tests
 * **Randomized A/B testing** for treatment-control incrementality measurement
 * **Commercial analytics** for connecting campaign performance to budget recommendations
-* **pytest** for validating data generation, experiment assignment, inference, and dbt parity
+* **pytest** for validating data generation, experiment assignment, inference, dbt parity, and DAG structure
+* **Apache Airflow** (optional extra) for local orchestration of that same sequence
 
 
 ## Experiment Design
@@ -343,6 +350,12 @@ Python still owns:
 * PASS/WARN/FAIL health status
 * deterministic campaign decisions
 
+Airflow owns:
+
+* task order
+* retries for transient failures
+* failing the pipeline when dbt tests or publication checks fail
+
 Frozen v1 estimands and Stage 4 decision rules were not rewritten in SQL. Parity tests compare dbt marts to the existing pandas ITT reference.
 
 ### Lineage
@@ -387,6 +400,23 @@ intermediate   assigned campaign-member population
 marts          business marts, including Python-enriched tables
 ```
 
+Airflow wraps this path. It does not replace dbt or Python:
+
+```text
+                    Airflow DAG
+                         |
+    +--------------------+--------------------+
+    |                    |                    |
+    v                    v                    v
+check sources         dbt run/test      Python inference
+                                              |
+                                              v
+                                    health + decisions
+                                              |
+                                              v
+                                    processed CSV checks
+```
+
 Files under `sql/staging/` and `sql/marts/` are **frozen legacy references**. They are not the default rebuild path. Reporting marts not migrated in Stage 5 still live only as legacy SQL:
 
 ```text
@@ -406,6 +436,8 @@ retail-media-platform/
 ├── app/
 │   ├── core/
 │   │   └── database.py
+│   ├── orchestration/
+│   │   └── checks.py
 │   └── statistics/
 │       ├── experiment_inference.py
 │       ├── experiment_health.py
@@ -440,10 +472,14 @@ retail-media-platform/
 │   ├── macros/
 │   └── tests/
 │
+├── dags/
+│   └── retail_media_measurement.py
+│
 ├── docs/
 │   ├── attribution_methodology.md
 │   ├── experiment_design.md
-│   └── kpi_definitions.md
+│   ├── kpi_definitions.md
+│   └── airflow.md
 │
 ├── notebooks/
 │   ├── 01_data_checks.ipynb
@@ -463,6 +499,8 @@ retail-media-platform/
 │   ├── run_analytics.sh
 │   ├── run_incrementality.py
 │   ├── run_experiment_decisions.py
+│   ├── check_pipeline_readiness.py
+│   ├── validate_pipeline_outputs.py
 │   ├── generate_recommendations.py
 │   └── validate_dbt_parity.py
 │
@@ -473,6 +511,7 @@ retail-media-platform/
 ├── tests/
 ├── .env.example
 ├── requirements.txt
+├── requirements-airflow.txt
 └── README.md
 ```
 
@@ -502,7 +541,11 @@ retail-media-platform/
 
 * Jupyter notebooks
 
-The current project does **not** contain a trained machine-learning model, production API, deployed dashboard, or MLflow experiment-tracking workflow.
+### Orchestration
+
+* Apache Airflow 3.x (optional; `requirements-airflow.txt`)
+
+The current project does **not** contain a trained machine-learning model, production API, deployed dashboard, or MLflow experiment-tracking workflow. Airflow here is a local DAG over frozen synthetic data, not a cloud-native production orchestrator.
 
 
 ## Running the Project
@@ -514,6 +557,12 @@ python -m venv venv_rmp
 source venv_rmp/bin/activate
 
 pip install -r requirements.txt
+```
+
+Optional local orchestrator (after the analytics install):
+
+```bash
+pip install -r requirements-airflow.txt
 ```
 
 Create `.env` from `.env.example` and configure the PostgreSQL connection.
@@ -581,6 +630,8 @@ Optional convenience command (dbt run + dbt test + Python enrichment + pytest):
 scripts/run_analytics.sh
 ```
 
+That script is the manual/CI equivalent of the Airflow DAG. The DAG is the canonical orchestrated path; the script remains for debugging.
+
 
 ### 5. Attach statistical uncertainty and decisions
 
@@ -623,12 +674,98 @@ data/processed/campaign_measurement_decisions.csv
 python -m pytest -q
 ```
 
-Current result after Stage 5:
+Current result after Stage 6:
 
 ```text
-python -m pytest -q   → 112 passed
+python -m pytest -q   → 131 passed
 dbt test              → 104 passed
 ```
+
+DAG import tests require `pip install -r requirements-airflow.txt`. Analytics tests do not.
+
+
+### 8. Run the Airflow DAG (optional)
+
+See [Automated Measurement Pipeline](#automated-measurement-pipeline) and `docs/airflow.md`.
+
+
+## Automated Measurement Pipeline
+
+Added an Airflow-orchestrated analytical pipeline that coordinates dbt transformations, data-quality validation, randomized incrementality inference, experiment-health evaluation, and campaign decision outputs.
+
+This is a **local portfolio DAG**, not a production or cloud orchestration system. The underlying dataset is frozen synthetic seed-0 data. Scheduling is therefore manual (`schedule=None`, `catchup=False`). A daily cron would only re-run the same snapshot.
+
+### Why Airflow was introduced
+
+The measurement path was already reproducible, but it required a human to run scripts in the correct order. Stage 6 makes that order explicit, retryable, and failure-safe.
+
+### What the DAG orchestrates
+
+DAG id: `retail_media_measurement_pipeline` (`dags/retail_media_measurement.py`)
+
+```text
+check_environment
+        ↓
+check_database
+        ↓
+validate_sources
+        ↓
+run_dbt_build          (scripts/run_dbt.sh run)
+        ↓
+run_dbt_tests          (scripts/run_dbt.sh test; no retries)
+        ↓
+run_incrementality     (scripts/run_incrementality.py --export-csv)
+        ↓
+run_experiment_decisions
+        ↓
+validate_outputs
+```
+
+Airflow does **not** compute Wald intervals, bootstrap draws, SRM, iROAS, or budget rules. Those stay in `app/statistics/`. dbt still owns warehouse SQL and tests.
+
+### Failure semantics
+
+Dependencies are linear. If dbt tests fail, incrementality and decisions do not run. If incrementality fails, decisions are not published. If the publication check fails, the DAG fails.
+
+### Retry behavior
+
+Transient tasks (database ping, `dbt run`, Python scripts) retry twice with a 30-second delay. Quality gates (`check_environment`, `run_dbt_tests`, `validate_outputs`) retry zero times so a failed test is not hidden.
+
+### Idempotency
+
+Rerunning the DAG against the same frozen inputs overwrites rather than appends:
+
+* dbt models are tables rebuilt in place
+* Python enrichment uses `to_sql(..., if_exists="replace")`
+* CSV exports overwrite files in `data/processed/`
+
+Frozen statistical results should not change. The DAG does not regenerate synthetic source data.
+
+### Local commands
+
+```bash
+export RETAIL_MEDIA_REPO="$(pwd)"
+export AIRFLOW_HOME="$RETAIL_MEDIA_REPO/.airflow"
+export AIRFLOW__CORE__DAGS_FOLDER="$RETAIL_MEDIA_REPO/dags"
+export AIRFLOW__CORE__LOAD_EXAMPLES=false
+export AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS=admin:admin
+export PYTHONPATH="$RETAIL_MEDIA_REPO${PYTHONPATH:+:$PYTHONPATH}"
+
+airflow db migrate
+airflow standalone
+```
+
+Trigger:
+
+```bash
+airflow dags unpause retail_media_measurement_pipeline
+airflow dags trigger retail_media_measurement_pipeline
+```
+
+Full developer notes: `docs/airflow.md`.
+
+
+## Validation
 
 
 ## Validation
@@ -683,6 +820,8 @@ The project tests core simulation and analytical logic, including:
 * health-aware deterministic decisions, including withholding interpretation after a failed experiment
 * dbt mart parity against the frozen pandas ITT reference
 * warehouse tests for control-exposure isolation, assignment uniqueness, outcome completeness, and subgroup reconciliation
+* pipeline readiness and processed-output publication checks
+* Airflow DAG import, task graph, retries, and catchup/schedule settings
 
 
 ## Current Limitations
@@ -715,7 +854,11 @@ The primary causal design is randomized treatment/control assignment.
 
 ### No production application layer
 
-The repository currently focuses on Python, PostgreSQL, experimentation, and analytical decision support rather than API or dashboard deployment.
+The repository currently focuses on Python, PostgreSQL, experimentation, analytical decision support, and a **local** Airflow DAG rather than API, dashboard, or cloud deployment.
+
+### Airflow is local and manual
+
+The DAG is not a production orchestrator. It does not ingest live campaigns, run on a cluster, or imply real-time measurement. `schedule=None` because the synthetic snapshot does not arrive daily.
 
 ### Planned power and MDE are not reconstructed
 
@@ -738,4 +881,4 @@ A campaign can receive credit for customer purchases without causing those purch
 
 > **What would these customers have done without the advertising?**
 
-This project demonstrates how randomized holdouts, governed SQL transformations, treatment-effect estimation, experiment-integrity checks, and deterministic decision rules can turn that question into measurable campaign outcomes and interpretable business decisions.
+This project demonstrates how randomized holdouts, governed SQL transformations, treatment-effect estimation, experiment-integrity checks, deterministic decision rules, and explicit pipeline orchestration can turn that question into measurable campaign outcomes and interpretable business decisions.
