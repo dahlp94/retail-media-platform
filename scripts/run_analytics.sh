@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Rebuild governed warehouse models, run dbt tests, then attach Python
 # inference and Stage 4 decisions. Does not regenerate synthetic source data.
+#
+# This is the manual/CI equivalent of dags/retail_media_measurement.py.
+# Prefer the Airflow DAG for orchestrated runs; keep this script for
+# debugging and recovery.
 
 set -euo pipefail
 
